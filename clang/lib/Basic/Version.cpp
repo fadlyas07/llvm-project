@@ -23,10 +23,10 @@ namespace clang {
 
 std::string getClangRepositoryPath() {
 #if defined(CLANG_REPOSITORY_STRING)
-  return CLANG_REPOSITORY_STRING;
+  return "";
 #else
 #ifdef CLANG_REPOSITORY
-  return CLANG_REPOSITORY;
+  return "";
 #else
   return "";
 #endif
@@ -35,7 +35,7 @@ std::string getClangRepositoryPath() {
 
 std::string getLLVMRepositoryPath() {
 #ifdef LLVM_REPOSITORY
-  return LLVM_REPOSITORY;
+  return "";
 #else
   return "";
 #endif
@@ -43,7 +43,7 @@ std::string getLLVMRepositoryPath() {
 
 std::string getClangRevision() {
 #ifdef CLANG_REVISION
-  return CLANG_REVISION;
+  return "";
 #else
   return "";
 #endif
@@ -51,7 +51,7 @@ std::string getClangRevision() {
 
 std::string getLLVMRevision() {
 #ifdef LLVM_REVISION
-  return LLVM_REVISION;
+  return "";
 #else
   return "";
 #endif
