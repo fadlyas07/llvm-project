@@ -1364,13 +1364,18 @@ genHLFIRIntrinsicRefCore(PreparedActualArguments &loweredActuals,
       hlfir::Entity actual = arg->getOriginalActual();
       mlir::Value valArg;
 
-      fir::ArgLoweringRule argRules =
-          fir::lowerIntrinsicArgumentAs(*argLowering, i);
-      if (!argRules.handleDynamicOptional &&
-          argRules.lowerAs != fir::LowerIntrinsicArgAs::Inquired)
-        valArg = hlfir::derefPointersAndAllocatables(loc, builder, actual);
-      else
-        valArg = actual.getBase();
+      // if intrinsic handler has no lowering rules
+      if (!argLowering) {
+        valArg = hlfir::loadTrivialScalar(loc, builder, actual);
+      } else {
+        fir::ArgLoweringRule argRules =
+            fir::lowerIntrinsicArgumentAs(*argLowering, i);
+        if (!argRules.handleDynamicOptional &&
+            argRules.lowerAs != fir::LowerIntrinsicArgAs::Inquired)
+          valArg = hlfir::derefPointersAndAllocatables(loc, builder, actual);
+        else
+          valArg = actual.getBase();
+      }
 
       operands.emplace_back(valArg);
     }
@@ -1510,6 +1515,21 @@ genHLFIRIntrinsicRefCore(PreparedActualArguments &loweredActuals,
     return {hlfir::EntityWithAttributes{countOp.getResult()}};
   }
 
+  if ((intrinsicName == "min" || intrinsicName == "max") &&
+      hlfir::getFortranElementType(callContext.resultType.value())
+          .isa<fir::CharacterType>()) {
+    llvm::SmallVector<mlir::Value> operands = getOperandVector(loweredActuals);
+    assert(operands.size() >= 2);
+
+    hlfir::CharExtremumPredicate pred = (intrinsicName == "min")
+                                            ? hlfir::CharExtremumPredicate::min
+                                            : hlfir::CharExtremumPredicate::max;
+    hlfir::CharExtremumOp charExtremumOp =
+        builder.create<hlfir::CharExtremumOp>(loc, pred,
+                                              mlir::ValueRange{operands});
+    return {hlfir::EntityWithAttributes{charExtremumOp.getResult()}};
+  }
+
   // TODO add hlfir operations for other transformational intrinsics here
 
   // fallback to calling the intrinsic via fir.call
@@ -1573,13 +1593,12 @@ public:
     }
     assert(shape &&
            "elemental array calls must have at least one array arguments");
-    if (mustBeOrdered)
-      TODO(loc, "ordered elemental calls in HLFIR");
     // Push a new local scope so that any temps made inside the elemental
     // iterations are cleaned up inside the iterations.
     if (!callContext.resultType) {
       // Subroutine case. Generate call inside loop nest.
-      hlfir::LoopNest loopNest = hlfir::genLoopNest(loc, builder, shape);
+      hlfir::LoopNest loopNest =
+          hlfir::genLoopNest(loc, builder, shape, !mustBeOrdered);
       mlir::ValueRange oneBasedIndices = loopNest.oneBasedIndices;
       auto insPt = builder.saveInsertionPoint();
       builder.setInsertionPointToStart(loopNest.innerLoop.getBody());
@@ -1624,8 +1643,9 @@ public:
       // use.
       return res;
     };
-    mlir::Value elemental = hlfir::genElementalOp(loc, builder, elementType,
-                                                  shape, typeParams, genKernel);
+    mlir::Value elemental =
+        hlfir::genElementalOp(loc, builder, elementType, shape, typeParams,
+                              genKernel, !mustBeOrdered);
     fir::FirOpBuilder *bldr = &builder;
     callContext.stmtCtx.attachCleanup(
         [=]() { bldr->create<hlfir::DestroyOp>(loc, elemental); });
@@ -1918,4 +1938,20 @@ std::optional<hlfir::EntityWithAttributes> Fortran::lower::convertCallToHLFIR(
     Fortran::lower::SymMap &symMap, Fortran::lower::StatementContext &stmtCtx) {
   CallContext callContext(procRef, resultType, loc, converter, symMap, stmtCtx);
   return genProcedureRef(callContext);
+}
+
+void Fortran::lower::convertUserDefinedAssignmentToHLFIR(
+    mlir::Location loc, Fortran::lower::AbstractConverter &converter,
+    const evaluate::ProcedureRef &procRef, hlfir::Entity lhs, hlfir::Entity rhs,
+    Fortran::lower::SymMap &symMap) {
+  Fortran::lower::StatementContext definedAssignmentContext;
+  CallContext callContext(procRef, /*resultType=*/std::nullopt, loc, converter,
+                          symMap, definedAssignmentContext);
+  Fortran::lower::CallerInterface caller(procRef, converter);
+  mlir::FunctionType callSiteType = caller.genFunctionType();
+  PreparedActualArgument preparedLhs{lhs, /*isPresent=*/std::nullopt};
+  PreparedActualArgument preparedRhs{rhs, /*isPresent=*/std::nullopt};
+  PreparedActualArguments loweredActuals{preparedLhs, preparedRhs};
+  genUserCall(loweredActuals, caller, callSiteType, callContext);
+  return;
 }

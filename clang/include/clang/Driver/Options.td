@@ -1124,6 +1124,10 @@ def gpu_bundle_output : Flag<["--"], "gpu-bundle-output">,
   Group<f_Group>, HelpText<"Bundle output files of HIP device compilation">;
 def no_gpu_bundle_output : Flag<["--"], "no-gpu-bundle-output">,
   Group<f_Group>, HelpText<"Do not bundle output files of HIP device compilation">;
+def fhip_emit_relocatable : Flag<["-"], "fhip-emit-relocatable">, Group<f_Group>,
+  HelpText<"Compile HIP source to relocatable">;
+def fno_hip_emit_relocatable : Flag<["-"], "fno-hip-emit-relocatable">, Group<f_Group>,
+  HelpText<"Do not override toolchain to compile HIP source to relocatable">;
 def cuid_EQ : Joined<["-"], "cuid=">, Flags<[CC1Option]>,
   HelpText<"An ID for compilation unit, which should be the same for the same "
            "compilation unit but different for different compilation units. "
@@ -3434,11 +3438,13 @@ defm column_info : BoolOption<"g", "column-info",
   CodeGenOpts<"DebugColumnInfo">, DefaultTrue,
   NegFlag<SetFalse, [CC1Option]>, PosFlag<SetTrue>, BothFlags<[CoreOption]>>,
   Group<g_flags_Group>;
-def gsplit_dwarf : Flag<["-"], "gsplit-dwarf">, Group<g_flags_Group>;
+def gsplit_dwarf : Flag<["-"], "gsplit-dwarf">, Group<g_flags_Group>,
+  Flags<[CoreOption]>;
 def gsplit_dwarf_EQ : Joined<["-"], "gsplit-dwarf=">, Group<g_flags_Group>,
-  HelpText<"Set DWARF fission mode">,
+  Flags<[CoreOption]>, HelpText<"Set DWARF fission mode">,
   Values<"split,single">;
-def gno_split_dwarf : Flag<["-"], "gno-split-dwarf">, Group<g_flags_Group>;
+def gno_split_dwarf : Flag<["-"], "gno-split-dwarf">, Group<g_flags_Group>,
+  Flags<[CoreOption]>;
 def gsimple_template_names : Flag<["-"], "gsimple-template-names">, Group<g_flags_Group>;
 def gsimple_template_names_EQ
     : Joined<["-"], "gsimple-template-names=">,
@@ -3718,6 +3724,12 @@ def meabi : Separate<["-"], "meabi">, Group<m_Group>, Flags<[CC1Option]>,
   NormalizedValues<["Default", "EABI4", "EABI5", "GNU"]>;
 def mtargetos_EQ : Joined<["-"], "mtargetos=">, Group<m_Group>,
   HelpText<"Set the deployment target to be the specified OS and OS version">;
+def mzos_hlq_le_EQ : Joined<["-"], "mzos-hlq-le=">, MetaVarName<"<LeHLQ>">,
+  HelpText<"High level qualifier for z/OS Language Environment datasets">;
+def mzos_hlq_clang_EQ : Joined<["-"], "mzos-hlq-clang=">, MetaVarName<"<ClangHLQ>">,
+  HelpText<"High level qualifier for z/OS C++RT side deck datasets">;
+def mzos_hlq_csslib_EQ : Joined<["-"], "mzos-hlq-csslib=">, MetaVarName<"<CsslibHLQ>">,
+  HelpText<"High level qualifier for z/OS CSSLIB dataset">;
 
 def mno_constant_cfstrings : Flag<["-"], "mno-constant-cfstrings">, Group<m_Group>;
 def mno_global_merge : Flag<["-"], "mno-global-merge">, Group<m_Group>, Flags<[CC1Option]>,
@@ -5101,7 +5113,11 @@ def falign_jumps_EQ : Joined<["-"], "falign-jumps=">, Group<clang_ignored_gcc_op
 // ignore it for now to avoid breaking builds that use it.
 def fdiagnostics_show_location_EQ : Joined<["-"], "fdiagnostics-show-location=">, Group<clang_ignored_f_Group>;
 
-defm fcheck_new : BooleanFFlag<"check-new">, Group<clang_ignored_f_Group>;
+defm check_new : BoolOption<"f", "check-new",
+  LangOpts<"CheckNew">, DefaultFalse,
+  PosFlag<SetTrue, [], "Do not assume C++ operator new may not return NULL">,
+  NegFlag<SetFalse>, BothFlags<[CC1Option]>>;
+
 defm caller_saves : BooleanFFlag<"caller-saves">, Group<clang_ignored_gcc_optimization_f_Group>;
 defm reorder_blocks : BooleanFFlag<"reorder-blocks">, Group<clang_ignored_gcc_optimization_f_Group>;
 defm branch_count_reg : BooleanFFlag<"branch-count-reg">, Group<clang_ignored_gcc_optimization_f_Group>;
@@ -5286,7 +5302,7 @@ def flang_experimental_hlfir : Flag<["-"], "flang-experimental-hlfir">,
 def flang_experimental_polymorphism : Flag<["-"], "flang-experimental-polymorphism">,
   Flags<[FlangOption, FC1Option, FlangOnlyOption, NoXarchOption, HelpHidden]>,
   HelpText<"Enable Fortran 2003 polymorphism (experimental)">;
-  
+
 
 //===----------------------------------------------------------------------===//
 // FLangOption + CoreOption + NoXarchOption

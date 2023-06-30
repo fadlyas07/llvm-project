@@ -4314,24 +4314,24 @@ defm : FPToIntegerPats<fp_to_uint, fp_to_uint_sat, fround, "FCVTAU">;
 
 let Predicates = [HasFullFP16] in {
   def : Pat<(i32 (any_lround f16:$Rn)),
-            (!cast<Instruction>(FCVTASUWHr) f16:$Rn)>;
+            (FCVTASUWHr f16:$Rn)>;
   def : Pat<(i64 (any_lround f16:$Rn)),
-            (!cast<Instruction>(FCVTASUXHr) f16:$Rn)>;
+            (FCVTASUXHr f16:$Rn)>;
   def : Pat<(i64 (any_llround f16:$Rn)),
-            (!cast<Instruction>(FCVTASUXHr) f16:$Rn)>;
+            (FCVTASUXHr f16:$Rn)>;
 }
 def : Pat<(i32 (any_lround f32:$Rn)),
-          (!cast<Instruction>(FCVTASUWSr) f32:$Rn)>;
+          (FCVTASUWSr f32:$Rn)>;
 def : Pat<(i32 (any_lround f64:$Rn)),
-          (!cast<Instruction>(FCVTASUWDr) f64:$Rn)>;
+          (FCVTASUWDr f64:$Rn)>;
 def : Pat<(i64 (any_lround f32:$Rn)),
-          (!cast<Instruction>(FCVTASUXSr) f32:$Rn)>;
+          (FCVTASUXSr f32:$Rn)>;
 def : Pat<(i64 (any_lround f64:$Rn)),
-          (!cast<Instruction>(FCVTASUXDr) f64:$Rn)>;
+          (FCVTASUXDr f64:$Rn)>;
 def : Pat<(i64 (any_llround f32:$Rn)),
-          (!cast<Instruction>(FCVTASUXSr) f32:$Rn)>;
+          (FCVTASUXSr f32:$Rn)>;
 def : Pat<(i64 (any_llround f64:$Rn)),
-          (!cast<Instruction>(FCVTASUXDr) f64:$Rn)>;
+          (FCVTASUXDr f64:$Rn)>;
 
 //===----------------------------------------------------------------------===//
 // Scaled integer to floating point conversion instructions.
@@ -4406,24 +4406,24 @@ let Predicates = [HasFRInt3264] in {
 // in the FCVTZS as the output of FRINTX is an integer).
 let Predicates = [HasFullFP16] in {
   def : Pat<(i32 (any_lrint f16:$Rn)),
-            (FCVTZSUWHr (!cast<Instruction>(FRINTXHr) f16:$Rn))>;
+            (FCVTZSUWHr (FRINTXHr f16:$Rn))>;
   def : Pat<(i64 (any_lrint f16:$Rn)),
-            (FCVTZSUXHr (!cast<Instruction>(FRINTXHr) f16:$Rn))>;
+            (FCVTZSUXHr (FRINTXHr f16:$Rn))>;
   def : Pat<(i64 (any_llrint f16:$Rn)),
-            (FCVTZSUXHr (!cast<Instruction>(FRINTXHr) f16:$Rn))>;
+            (FCVTZSUXHr (FRINTXHr f16:$Rn))>;
 }
 def : Pat<(i32 (any_lrint f32:$Rn)),
-          (FCVTZSUWSr (!cast<Instruction>(FRINTXSr) f32:$Rn))>;
+          (FCVTZSUWSr (FRINTXSr f32:$Rn))>;
 def : Pat<(i32 (any_lrint f64:$Rn)),
-          (FCVTZSUWDr (!cast<Instruction>(FRINTXDr) f64:$Rn))>;
+          (FCVTZSUWDr (FRINTXDr f64:$Rn))>;
 def : Pat<(i64 (any_lrint f32:$Rn)),
-          (FCVTZSUXSr (!cast<Instruction>(FRINTXSr) f32:$Rn))>;
+          (FCVTZSUXSr (FRINTXSr f32:$Rn))>;
 def : Pat<(i64 (any_lrint f64:$Rn)),
-          (FCVTZSUXDr (!cast<Instruction>(FRINTXDr) f64:$Rn))>;
+          (FCVTZSUXDr (FRINTXDr f64:$Rn))>;
 def : Pat<(i64 (any_llrint f32:$Rn)),
-          (FCVTZSUXSr (!cast<Instruction>(FRINTXSr) f32:$Rn))>;
+          (FCVTZSUXSr (FRINTXSr f32:$Rn))>;
 def : Pat<(i64 (any_llrint f64:$Rn)),
-          (FCVTZSUXDr (!cast<Instruction>(FRINTXDr) f64:$Rn))>;
+          (FCVTZSUXDr (FRINTXDr f64:$Rn))>;
 
 //===----------------------------------------------------------------------===//
 // Floating point two operand instructions.
@@ -8848,6 +8848,18 @@ let Predicates = [HasMOPS, HasMTE], Defs = [NZCV], Size = 12, mayLoad = 0, maySt
                                           (ins GPR64common:$Rd, GPR64:$Rn, GPR64:$Rm),
                                           [], "$Rd = $Rd_wb,$Rn = $Rn_wb">, Sched<[]>;
 }
+
+//-----------------------------------------------------------------------------
+// v8.3 Pointer Authentication late patterns
+
+let Predicates = [HasPAuth] in {
+def : Pat<(int_ptrauth_blend GPR64:$Rd, imm64_0_65535:$imm),
+          (MOVKXi GPR64:$Rd, (trunc_imm imm64_0_65535:$imm), 48)>;
+def : Pat<(int_ptrauth_blend GPR64:$Rd, GPR64:$Rn),
+          (BFMXri GPR64:$Rd, GPR64:$Rn, 16, 15)>;
+}
+
+//-----------------------------------------------------------------------------
 
 // This gets lowered into an instruction sequence of 20 bytes
 let Defs = [X16, X17], mayStore = 1, isCodeGenOnly = 1, Size = 20 in

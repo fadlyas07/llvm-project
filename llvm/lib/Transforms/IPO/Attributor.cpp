@@ -563,6 +563,15 @@ bool AA::getPotentialCopiesOfStoredValue(
 static bool isAssumedReadOnlyOrReadNone(Attributor &A, const IRPosition &IRP,
                                         const AbstractAttribute &QueryingAA,
                                         bool RequireReadNone, bool &IsKnown) {
+  if (RequireReadNone) {
+    if (AA::hasAssumedIRAttr<Attribute::ReadNone>(
+            A, QueryingAA, IRP, DepClassTy::OPTIONAL, IsKnown,
+            /* IgnoreSubsumingPositions */ true))
+      return true;
+  } else if (AA::hasAssumedIRAttr<Attribute::ReadOnly>(
+                 A, QueryingAA, IRP, DepClassTy::OPTIONAL, IsKnown,
+                 /* IgnoreSubsumingPositions */ true))
+    return true;
 
   IRPosition::Kind Kind = IRP.getPositionKind();
   if (Kind == IRPosition::IRP_FUNCTION || Kind == IRPosition::IRP_CALL_SITE) {
@@ -980,7 +989,7 @@ Argument *IRPosition::getAssociatedArgument() const {
 
   // If no callbacks were found, or none used the underlying call site operand
   // exclusively, use the direct callee argument if available.
-  const Function *Callee = CB.getCalledFunction();
+  auto *Callee = dyn_cast_if_present<Function>(CB.getCalledOperand());
   if (Callee && Callee->arg_size() > unsigned(ArgNo))
     return Callee->getArg(ArgNo);
 
@@ -1006,29 +1015,18 @@ ChangeStatus
 IRAttributeManifest::manifestAttrs(Attributor &A, const IRPosition &IRP,
                                    const ArrayRef<Attribute> &DeducedAttrs,
                                    bool ForceReplace) {
-  Function *ScopeFn = IRP.getAnchorScope();
-  IRPosition::Kind PK = IRP.getPositionKind();
+  switch (IRP.getPositionKind()) {
+  case IRPosition::IRP_FLOAT:
+  case IRPosition::IRP_INVALID:
+    return ChangeStatus::UNCHANGED;
+  default:
+    break;
+  };
 
   // In the following some generic code that will manifest attributes in
   // DeducedAttrs if they improve the current IR. Due to the different
   // annotation positions we use the underlying AttributeList interface.
-
-  AttributeList Attrs;
-  switch (PK) {
-  case IRPosition::IRP_INVALID:
-  case IRPosition::IRP_FLOAT:
-    return ChangeStatus::UNCHANGED;
-  case IRPosition::IRP_ARGUMENT:
-  case IRPosition::IRP_FUNCTION:
-  case IRPosition::IRP_RETURNED:
-    Attrs = ScopeFn->getAttributes();
-    break;
-  case IRPosition::IRP_CALL_SITE:
-  case IRPosition::IRP_CALL_SITE_RETURNED:
-  case IRPosition::IRP_CALL_SITE_ARGUMENT:
-    Attrs = cast<CallBase>(IRP.getAnchorValue()).getAttributes();
-    break;
-  }
+  AttributeList Attrs = IRP.getAttrList();
 
   ChangeStatus HasChanged = ChangeStatus::UNCHANGED;
   LLVMContext &Ctx = IRP.getAnchorValue().getContext();
@@ -1042,22 +1040,7 @@ IRAttributeManifest::manifestAttrs(Attributor &A, const IRPosition &IRP,
   if (HasChanged == ChangeStatus::UNCHANGED)
     return HasChanged;
 
-  switch (PK) {
-  case IRPosition::IRP_ARGUMENT:
-  case IRPosition::IRP_FUNCTION:
-  case IRPosition::IRP_RETURNED:
-    ScopeFn->setAttributes(Attrs);
-    break;
-  case IRPosition::IRP_CALL_SITE:
-  case IRPosition::IRP_CALL_SITE_RETURNED:
-  case IRPosition::IRP_CALL_SITE_ARGUMENT:
-    cast<CallBase>(IRP.getAnchorValue()).setAttributes(Attrs);
-    break;
-  case IRPosition::IRP_INVALID:
-  case IRPosition::IRP_FLOAT:
-    break;
-  }
-
+  IRP.setAttrList(Attrs);
   return HasChanged;
 }
 
@@ -1090,7 +1073,7 @@ SubsumingPositionIterator::SubsumingPositionIterator(const IRPosition &IRP) {
     // TODO: We need to look at the operand bundles similar to the redirection
     //       in CallBase.
     if (!CB->hasOperandBundles() || CanIgnoreOperandBundles(*CB))
-      if (const Function *Callee = CB->getCalledFunction())
+      if (auto *Callee = dyn_cast_if_present<Function>(CB->getCalledOperand()))
         IRPositions.emplace_back(IRPosition::function(*Callee));
     return;
   case IRPosition::IRP_CALL_SITE_RETURNED:
@@ -1098,7 +1081,8 @@ SubsumingPositionIterator::SubsumingPositionIterator(const IRPosition &IRP) {
     // TODO: We need to look at the operand bundles similar to the redirection
     //       in CallBase.
     if (!CB->hasOperandBundles() || CanIgnoreOperandBundles(*CB)) {
-      if (const Function *Callee = CB->getCalledFunction()) {
+      if (auto *Callee =
+              dyn_cast_if_present<Function>(CB->getCalledOperand())) {
         IRPositions.emplace_back(IRPosition::returned(*Callee));
         IRPositions.emplace_back(IRPosition::function(*Callee));
         for (const Argument &Arg : Callee->args())
@@ -1118,7 +1102,7 @@ SubsumingPositionIterator::SubsumingPositionIterator(const IRPosition &IRP) {
     // TODO: We need to look at the operand bundles similar to the redirection
     //       in CallBase.
     if (!CB->hasOperandBundles() || CanIgnoreOperandBundles(*CB)) {
-      const Function *Callee = CB->getCalledFunction();
+      auto *Callee = dyn_cast_if_present<Function>(CB->getCalledOperand());
       if (Callee) {
         if (Argument *Arg = IRP.getAssociatedArgument())
           IRPositions.emplace_back(IRPosition::argument(*Arg));
@@ -1173,11 +1157,7 @@ bool IRPosition::getAttrsFromIRAttr(Attribute::AttrKind AK,
   if (getPositionKind() == IRP_INVALID || getPositionKind() == IRP_FLOAT)
     return false;
 
-  AttributeList AttrList;
-  if (const auto *CB = dyn_cast<CallBase>(&getAnchorValue()))
-    AttrList = CB->getAttributes();
-  else
-    AttrList = getAssociatedFunction()->getAttributes();
+  AttributeList AttrList = getAttrList();
 
   bool HasAttr = AttrList.hasAttributeAtIndex(getAttrIdx(), AK);
   if (HasAttr)
@@ -1375,7 +1355,8 @@ std::optional<Value *> Attributor::translateArgumentToCallSiteContent(
   if (*V == nullptr || isa<Constant>(*V))
     return V;
   if (auto *Arg = dyn_cast<Argument>(*V))
-    if (CB.getCalledFunction() == Arg->getParent())
+    if (CB.getCalledOperand() == Arg->getParent() &&
+        CB.arg_size() > Arg->getArgNo())
       if (!Arg->hasPointeeInMemoryValueAttr())
         return getAssumedSimplified(
             IRPosition::callsite_argument(CB, Arg->getArgNo()), AA,
@@ -1396,6 +1377,8 @@ bool Attributor::isAssumedDead(const AbstractAttribute &AA,
                                const AAIsDead *FnLivenessAA,
                                bool &UsedAssumedInformation,
                                bool CheckBBLivenessOnly, DepClassTy DepClass) {
+  if (!Configuration.UseLiveness)
+    return false;
   const IRPosition &IRP = AA.getIRPosition();
   if (!Functions.count(IRP.getAnchorScope()))
     return false;
@@ -1408,6 +1391,8 @@ bool Attributor::isAssumedDead(const Use &U,
                                const AAIsDead *FnLivenessAA,
                                bool &UsedAssumedInformation,
                                bool CheckBBLivenessOnly, DepClassTy DepClass) {
+  if (!Configuration.UseLiveness)
+    return false;
   Instruction *UserI = dyn_cast<Instruction>(U.getUser());
   if (!UserI)
     return isAssumedDead(IRPosition::value(*U.get()), QueryingAA, FnLivenessAA,
@@ -1456,6 +1441,8 @@ bool Attributor::isAssumedDead(const Instruction &I,
                                bool &UsedAssumedInformation,
                                bool CheckBBLivenessOnly, DepClassTy DepClass,
                                bool CheckForDeadStore) {
+  if (!Configuration.UseLiveness)
+    return false;
   const IRPosition::CallBaseContext *CBCtx =
       QueryingAA ? QueryingAA->getCallBaseContext() : nullptr;
 
@@ -1516,6 +1503,8 @@ bool Attributor::isAssumedDead(const IRPosition &IRP,
                                const AAIsDead *FnLivenessAA,
                                bool &UsedAssumedInformation,
                                bool CheckBBLivenessOnly, DepClassTy DepClass) {
+  if (!Configuration.UseLiveness)
+    return false;
   // Don't check liveness for constants, e.g. functions, used as (floating)
   // values since the context instruction and such is here meaningless.
   if (IRP.getPositionKind() == IRPosition::IRP_FLOAT &&
@@ -1561,6 +1550,8 @@ bool Attributor::isAssumedDead(const BasicBlock &BB,
                                const AbstractAttribute *QueryingAA,
                                const AAIsDead *FnLivenessAA,
                                DepClassTy DepClass) {
+  if (!Configuration.UseLiveness)
+    return false;
   const Function &F = *BB.getParent();
   if (!FnLivenessAA || FnLivenessAA->getAnchorScope() != &F)
     FnLivenessAA = getOrCreateAAFor<AAIsDead>(IRPosition::function(F),
@@ -2314,9 +2305,9 @@ ChangeStatus Attributor::cleanupIR() {
       if (CB->isArgOperand(U)) {
         unsigned Idx = CB->getArgOperandNo(U);
         CB->removeParamAttr(Idx, Attribute::NoUndef);
-        Function *Fn = CB->getCalledFunction();
-        if (Fn && Fn->arg_size() > Idx)
-          Fn->removeParamAttr(Idx, Attribute::NoUndef);
+        auto *Callee = dyn_cast_if_present<Function>(CB->getCalledOperand());
+        if (Callee && Callee->arg_size() > Idx)
+          Callee->removeParamAttr(Idx, Attribute::NoUndef);
       }
     }
     if (isa<Constant>(NewV) && isa<BranchInst>(U->getUser())) {
@@ -2715,7 +2706,10 @@ bool Attributor::isValidFunctionSignatureRewrite(
         ACS.getInstruction()->getType() !=
             ACS.getCalledFunction()->getReturnType())
       return false;
-    if (ACS.getCalledOperand()->getType() != Fn->getType())
+    if (cast<CallBase>(ACS.getInstruction())->getCalledOperand()->getType() !=
+        Fn->getType())
+      return false;
+    if (ACS.getNumArgOperands() != Fn->arg_size())
       return false;
     // Forbid must-tail calls for now.
     return !ACS.isCallbackCall() && !ACS.getInstruction()->isMustTailCall();
@@ -2741,7 +2735,8 @@ bool Attributor::isValidFunctionSignatureRewrite(
   // Avoid callbacks for now.
   bool UsedAssumedInformation = false;
   if (!checkForAllCallSites(CallSiteCanBeChanged, *Fn, true, nullptr,
-                            UsedAssumedInformation)) {
+                            UsedAssumedInformation,
+                            /* CheckPotentiallyDead */ true)) {
     LLVM_DEBUG(dbgs() << "[Attributor] Cannot rewrite all call sites\n");
     return false;
   }
@@ -3084,7 +3079,8 @@ void InformationCache::initializeInformationCache(const Function &CF,
         AddToAssumeUsesMap(*Assume->getArgOperand(0));
       } else if (cast<CallInst>(I).isMustTailCall()) {
         FI.ContainsMustTailCall = true;
-        if (const Function *Callee = cast<CallInst>(I).getCalledFunction())
+        if (auto *Callee = dyn_cast_if_present<Function>(
+                cast<CallInst>(I).getCalledOperand()))
           getFunctionInfo(*Callee).CalledViaMustTail = true;
       }
       [[fallthrough]];
@@ -3314,7 +3310,7 @@ void Attributor::identifyDefaultAbstractAttributes(Function &F) {
     // users. The return value might be dead if there are no live users.
     getOrCreateAAFor<AAIsDead>(CBInstPos);
 
-    Function *Callee = CB.getCalledFunction();
+    Function *Callee = dyn_cast_if_present<Function>(CB.getCalledOperand());
     // TODO: Even if the callee is not known now we might be able to simplify
     //       the call/callee.
     if (!Callee)

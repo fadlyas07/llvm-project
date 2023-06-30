@@ -223,9 +223,7 @@ struct VectorizationState {
     assert(areValidScalableVecDims(scalableDims) &&
            "Permuted scalable vector dimensions are not supported");
 
-    // TODO: Extend scalable vector type to support a bit map.
-    bool numScalableDims = !scalableVecDims.empty() && scalableVecDims.back();
-    return VectorType::get(vectorShape, elementType, numScalableDims);
+    return VectorType::get(vectorShape, elementType, scalableDims);
   }
 
   /// Masks an operation with the canonical vector mask if the operation needs
@@ -605,8 +603,18 @@ static Value buildVectorWrite(RewriterBase &rewriter, Value value,
   Location loc = value.getLoc();
   auto linalgOp = cast<LinalgOp>(outputOperand->getOwner());
   AffineMap opOperandMap = linalgOp.getMatchingIndexingMap(outputOperand);
+
+  // Compute the vector type of the value to store. This type should be an
+  // identity or projection of the canonical vector type without any permutation
+  // applied, given that any permutation in a transfer write happens as part of
+  // the write itself.
+  AffineMap vectorTypeMap = AffineMap::getFilteredIdentityMap(
+      opOperandMap.getContext(), opOperandMap.getNumInputs(),
+      [&](AffineDimExpr dimExpr) -> bool {
+        return llvm::is_contained(opOperandMap.getResults(), dimExpr);
+      });
   auto vectorType = state.getCanonicalVecType(
-      getElementTypeOrSelf(outputOperand->get().getType()), opOperandMap);
+      getElementTypeOrSelf(outputOperand->get().getType()), vectorTypeMap);
 
   Operation *write;
   if (vectorType.getRank() > 0) {
@@ -614,13 +622,14 @@ static Value buildVectorWrite(RewriterBase &rewriter, Value value,
     SmallVector<Value> indices(linalgOp.getRank(outputOperand),
                                rewriter.create<arith::ConstantIndexOp>(loc, 0));
     value = broadcastIfNeeded(rewriter, value, vectorType);
+    assert(value.getType() == vectorType && "Incorrect type");
     write = rewriter.create<vector::TransferWriteOp>(
         loc, value, outputOperand->get(), indices, writeMap);
   } else {
     // 0-d case is still special: do not invert the reindexing writeMap.
     if (!isa<VectorType>(value.getType()))
       value = rewriter.create<vector::BroadcastOp>(loc, vectorType, value);
-    assert(value.getType() == vectorType && "incorrect type");
+    assert(value.getType() == vectorType && "Incorrect type");
     write = rewriter.create<vector::TransferWriteOp>(
         loc, value, outputOperand->get(), ValueRange{});
   }
@@ -1216,7 +1225,7 @@ vectorizeOneOp(RewriterBase &rewriter, VectorizationState &state,
     if (firstMaxRankedType) {
       auto vecType = VectorType::get(firstMaxRankedType.getShape(),
                                      getElementTypeOrSelf(vecOperand.getType()),
-                                     firstMaxRankedType.getNumScalableDims());
+                                     firstMaxRankedType.getScalableDims());
       vecOperands.push_back(broadcastIfNeeded(rewriter, vecOperand, vecType));
     } else {
       vecOperands.push_back(vecOperand);
@@ -1228,7 +1237,7 @@ vectorizeOneOp(RewriterBase &rewriter, VectorizationState &state,
     resultTypes.push_back(
         firstMaxRankedType
             ? VectorType::get(firstMaxRankedType.getShape(), resultType,
-                              firstMaxRankedType.getNumScalableDims())
+                              firstMaxRankedType.getScalableDims())
             : resultType);
   }
   //   d. Build and return the new op.

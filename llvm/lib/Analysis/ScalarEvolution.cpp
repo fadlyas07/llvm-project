@@ -71,6 +71,7 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
@@ -1550,10 +1551,7 @@ ScalarEvolution::getZeroExtendExpr(const SCEV *Op, Type *Ty, unsigned Depth) {
   assert(!Op->getType()->isPointerTy() && "Can't extend pointer!");
   Ty = getEffectiveSCEVType(Ty);
 
-  FoldID ID;
-  ID.addInteger(scZeroExtend);
-  ID.addPointer(Op);
-  ID.addPointer(Ty);
+  FoldID ID(scZeroExtend, Op, Ty);
   auto Iter = FoldCache.find(ID);
   if (Iter != FoldCache.end())
     return Iter->second;
@@ -1889,10 +1887,7 @@ ScalarEvolution::getSignExtendExpr(const SCEV *Op, Type *Ty, unsigned Depth) {
   assert(!Op->getType()->isPointerTy() && "Can't extend pointer!");
   Ty = getEffectiveSCEVType(Ty);
 
-  FoldID ID;
-  ID.addInteger(scSignExtend);
-  ID.addPointer(Op);
-  ID.addPointer(Ty);
+  FoldID ID(scSignExtend, Op, Ty);
   auto Iter = FoldCache.find(ID);
   if (Iter != FoldCache.end())
     return Iter->second;
@@ -6815,13 +6810,14 @@ const ConstantRange &ScalarEvolution::getRangeRef(
           RangeType);
 
     if (U->getType()->isPointerTy() && SignHint == HINT_RANGE_UNSIGNED) {
-      // Strengthen the range if the underlying IR value is a global/alloca
-      // using the size of the object.
+      // Strengthen the range if the underlying IR value is a
+      // global/alloca/heap allocation using the size of the object.
       ObjectSizeOpts Opts;
       Opts.RoundToAlign = false;
       Opts.NullIsUnknownSize = true;
       uint64_t ObjSize;
-      if ((isa<GlobalVariable>(V) || isa<AllocaInst>(V)) &&
+      if ((isa<GlobalVariable>(V) || isa<AllocaInst>(V) ||
+           isAllocationFn(V, &TLI)) &&
           getObjectSize(V, ObjSize, DL, &TLI, Opts) && ObjSize > 1) {
         // The highest address the object can start is ObjSize bytes before the
         // end (unsigned max value). If this value is not a multiple of the
@@ -6833,8 +6829,11 @@ const ConstantRange &ScalarEvolution::getRangeRef(
         uint64_t Align = U->getValue()->getPointerAlignment(DL).value();
         uint64_t Rem = MaxVal.urem(Align);
         MaxVal -= APInt(BitWidth, Rem);
+        APInt MinVal = APInt::getZero(BitWidth);
+        if (llvm::isKnownNonZero(V, DL))
+          MinVal = Align;
         ConservativeResult = ConservativeResult.intersectWith(
-            {ConservativeResult.getUnsignedMin(), MaxVal + 1}, RangeType);
+            {MinVal, MaxVal + 1}, RangeType);
       }
     }
 
@@ -8107,126 +8106,6 @@ unsigned ScalarEvolution::getSmallConstantMaxTripCount(const Loop *L) {
   const auto *MaxExitCount =
       dyn_cast<SCEVConstant>(getConstantMaxBackedgeTakenCount(L));
   return getConstantTripCount(MaxExitCount);
-}
-
-const SCEV *ScalarEvolution::getConstantMaxTripCountFromArray(const Loop *L) {
-  // We can't infer from Array in Irregular Loop.
-  // FIXME: It's hard to infer loop bound from array operated in Nested Loop.
-  if (!L->isLoopSimplifyForm() || !L->isInnermost())
-    return getCouldNotCompute();
-
-  // FIXME: To make the scene more typical, we only analysis loops that have
-  // one exiting block and that block must be the latch. To make it easier to
-  // capture loops that have memory access and memory access will be executed
-  // in each iteration.
-  const BasicBlock *LoopLatch = L->getLoopLatch();
-  assert(LoopLatch && "See defination of simplify form loop.");
-  if (L->getExitingBlock() != LoopLatch)
-    return getCouldNotCompute();
-
-  const DataLayout &DL = getDataLayout();
-  SmallVector<const SCEV *> InferCountColl;
-  for (auto *BB : L->getBlocks()) {
-    // Go here, we can know that Loop is a single exiting and simplified form
-    // loop. Make sure that infer from Memory Operation in those BBs must be
-    // executed in loop. First step, we can make sure that max execution time
-    // of MemAccessBB in loop represents latch max excution time.
-    // If MemAccessBB does not dom Latch, skip.
-    //            Entry
-    //              │
-    //        ┌─────▼─────┐
-    //        │Loop Header◄─────┐
-    //        └──┬──────┬─┘     │
-    //           │      │       │
-    //  ┌────────▼──┐ ┌─▼─────┐ │
-    //  │MemAccessBB│ │OtherBB│ │
-    //  └────────┬──┘ └─┬─────┘ │
-    //           │      │       │
-    //         ┌─▼──────▼─┐     │
-    //         │Loop Latch├─────┘
-    //         └────┬─────┘
-    //              ▼
-    //             Exit
-    if (!DT.dominates(BB, LoopLatch))
-      continue;
-
-    for (Instruction &Inst : *BB) {
-      // Find Memory Operation Instruction.
-      auto *GEP = getLoadStorePointerOperand(&Inst);
-      if (!GEP)
-        continue;
-
-      auto *ElemSize = dyn_cast<SCEVConstant>(getElementSize(&Inst));
-      // Do not infer from scalar type, eg."ElemSize = sizeof()".
-      if (!ElemSize)
-        continue;
-
-      // Use a existing polynomial recurrence on the trip count.
-      auto *AddRec = dyn_cast<SCEVAddRecExpr>(getSCEV(GEP));
-      if (!AddRec)
-        continue;
-      auto *ArrBase = dyn_cast<SCEVUnknown>(getPointerBase(AddRec));
-      auto *Step = dyn_cast<SCEVConstant>(AddRec->getStepRecurrence(*this));
-      if (!ArrBase || !Step)
-        continue;
-      assert(isLoopInvariant(ArrBase, L) && "See addrec definition");
-
-      // Only handle { %array + step },
-      // FIXME: {(SCEVAddRecExpr) + step } could not be analysed here.
-      if (AddRec->getStart() != ArrBase)
-        continue;
-
-      // Memory operation pattern which have gaps.
-      // Or repeat memory opreation.
-      // And index of GEP wraps arround.
-      if (Step->getAPInt().getActiveBits() > 32 ||
-          Step->getAPInt().getZExtValue() !=
-              ElemSize->getAPInt().getZExtValue() ||
-          Step->isZero() || Step->getAPInt().isNegative())
-        continue;
-
-      // Only infer from stack array which has certain size.
-      // Make sure alloca instruction is not excuted in loop.
-      AllocaInst *AllocateInst = dyn_cast<AllocaInst>(ArrBase->getValue());
-      if (!AllocateInst || L->contains(AllocateInst->getParent()))
-        continue;
-
-      // Make sure only handle normal array.
-      auto *Ty = dyn_cast<ArrayType>(AllocateInst->getAllocatedType());
-      auto *ArrSize = dyn_cast<ConstantInt>(AllocateInst->getArraySize());
-      if (!Ty || !ArrSize || !ArrSize->isOne())
-        continue;
-
-      // FIXME: Since gep indices are silently zext to the indexing type,
-      // we will have a narrow gep index which wraps around rather than
-      // increasing strictly, we shoule ensure that step is increasing
-      // strictly by the loop iteration.
-      // Now we can infer a max execution time by MemLength/StepLength.
-      const SCEV *MemSize =
-          getConstant(Step->getType(), DL.getTypeAllocSize(Ty));
-      auto *MaxExeCount =
-          dyn_cast<SCEVConstant>(getUDivCeilSCEV(MemSize, Step));
-      if (!MaxExeCount || MaxExeCount->getAPInt().getActiveBits() > 32)
-        continue;
-
-      // If the loop reaches the maximum number of executions, we can not
-      // access bytes starting outside the statically allocated size without
-      // being immediate UB. But it is allowed to enter loop header one more
-      // time.
-      auto *InferCount = dyn_cast<SCEVConstant>(
-          getAddExpr(MaxExeCount, getOne(MaxExeCount->getType())));
-      // Discard the maximum number of execution times under 32bits.
-      if (!InferCount || InferCount->getAPInt().getActiveBits() > 32)
-        continue;
-
-      InferCountColl.push_back(InferCount);
-    }
-  }
-
-  if (InferCountColl.size() == 0)
-    return getCouldNotCompute();
-
-  return getUMinFromMismatchedTypes(InferCountColl);
 }
 
 unsigned ScalarEvolution::getSmallConstantTripMultiple(const Loop *L) {
@@ -13566,16 +13445,36 @@ static void PrintLoopInfo(raw_ostream &OS, ScalarEvolution *SE,
   }
 }
 
-static StringRef loopDispositionToStr(ScalarEvolution::LoopDisposition LD) {
+namespace llvm {
+raw_ostream &operator<<(raw_ostream &OS, ScalarEvolution::LoopDisposition LD) {
   switch (LD) {
   case ScalarEvolution::LoopVariant:
-    return "Variant";
+    OS << "Variant";
+    break;
   case ScalarEvolution::LoopInvariant:
-    return "Invariant";
+    OS << "Invariant";
+    break;
   case ScalarEvolution::LoopComputable:
-    return "Computable";
+    OS << "Computable";
+    break;
   }
-  llvm_unreachable("Unknown ScalarEvolution::LoopDisposition kind!");
+  return OS;
+}
+
+raw_ostream &operator<<(raw_ostream &OS, ScalarEvolution::BlockDisposition BD) {
+  switch (BD) {
+  case ScalarEvolution::DoesNotDominateBlock:
+    OS << "DoesNotDominate";
+    break;
+  case ScalarEvolution::DominatesBlock:
+    OS << "Dominates";
+    break;
+  case ScalarEvolution::ProperlyDominatesBlock:
+    OS << "ProperlyDominates";
+    break;
+  }
+  return OS;
+}
 }
 
 void ScalarEvolution::print(raw_ostream &OS) const {
@@ -13637,7 +13536,7 @@ void ScalarEvolution::print(raw_ostream &OS) const {
             }
 
             Iter->getHeader()->printAsOperand(OS, /*PrintType=*/false);
-            OS << ": " << loopDispositionToStr(SE.getLoopDisposition(SV, Iter));
+            OS << ": " << SE.getLoopDisposition(SV, Iter);
           }
 
           for (const auto *InnerL : depth_first(L)) {
@@ -13651,7 +13550,7 @@ void ScalarEvolution::print(raw_ostream &OS) const {
             }
 
             InnerL->getHeader()->printAsOperand(OS, /*PrintType=*/false);
-            OS << ": " << loopDispositionToStr(SE.getLoopDisposition(SV, InnerL));
+            OS << ": " << SE.getLoopDisposition(SV, InnerL);
           }
 
           OS << " }";
@@ -14237,9 +14136,8 @@ void ScalarEvolution::verify() const {
       const auto RecomputedDisposition = SE2.getLoopDisposition(S, Loop);
       if (CachedDisposition != RecomputedDisposition) {
         dbgs() << "Cached disposition of " << *S << " for loop " << *Loop
-               << " is incorrect: cached "
-               << loopDispositionToStr(CachedDisposition) << ", actual "
-               << loopDispositionToStr(RecomputedDisposition) << "\n";
+               << " is incorrect: cached " << CachedDisposition << ", actual "
+               << RecomputedDisposition << "\n";
         std::abort();
       }
     }
@@ -14251,7 +14149,8 @@ void ScalarEvolution::verify() const {
       const auto RecomputedDisposition = SE2.getBlockDisposition(S, BB);
       if (CachedDisposition != RecomputedDisposition) {
         dbgs() << "Cached disposition of " << *S << " for block %"
-               << BB->getName() << " is incorrect! \n";
+               << BB->getName() << " is incorrect: cached " << CachedDisposition
+               << ", actual " << RecomputedDisposition << "\n";
         std::abort();
       }
     }

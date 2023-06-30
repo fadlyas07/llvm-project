@@ -4623,13 +4623,13 @@ TEST_F(FormatTest, FormatsInlineASM) {
 
   Style.BreakBeforeInlineASMColon = FormatStyle::BBIAS_OnlyMultiline;
   verifyFormat(Code1, Style);
-  EXPECT_EQ(Code2, format(Code2, Style));
-  EXPECT_EQ(Code3, format(Code3, Style));
+  verifyNoChange(Code2, Style);
+  verifyNoChange(Code3, Style);
 
   Style.BreakBeforeInlineASMColon = FormatStyle::BBIAS_Always;
-  EXPECT_EQ(Code2, format(Code1, Style));
-  EXPECT_EQ(Code2, format(Code2, Style));
-  EXPECT_EQ(Code2, format(Code3, Style));
+  verifyFormat(Code2, Code1, Style);
+  verifyNoChange(Code2, Style);
+  verifyFormat(Code2, Code3, Style);
 }
 
 TEST_F(FormatTest, FormatTryCatch) {
@@ -11579,6 +11579,14 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
                    "    return s << a.DebugString(); \\\n"
                    "  }",
                    getLLVMStyleWithColumns(50)));
+
+// FIXME: We should be able to figure out this is an operator call
+#if 0
+  verifyFormat("#define FOO             \\\n"
+               "  void foo() {          \\\n"
+               "    operator+(a * b);   \\\n"
+               "  }", getLLVMStyleWithColumns(25));
+#endif
 
   // FIXME: We cannot handle this case yet; we might be able to figure out that
   // foo<x> d > v; doesn't make sense.

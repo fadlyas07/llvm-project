@@ -24,6 +24,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/AssumptionCache.h"
@@ -1886,13 +1887,6 @@ struct AAPointerInfoArgument final : AAPointerInfoFloating {
   AAPointerInfoArgument(const IRPosition &IRP, Attributor &A)
       : AAPointerInfoFloating(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAPointerInfoFloating::initialize(A);
-    if (getAnchorScope()->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::trackStatistics()
   void trackStatistics() const override {
     AAPointerInfoImpl::trackPointerInfoStatistics(getIRPosition());
@@ -2034,14 +2028,6 @@ struct AANoUnwindCallSite final : AANoUnwindImpl {
   AANoUnwindCallSite(const IRPosition &IRP, Attributor &A)
       : AANoUnwindImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoUnwindImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
     // TODO: Once we have call site specific value information we can provide
@@ -2095,12 +2081,10 @@ public:
     ReturnedValues.clear();
 
     Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration()) {
+    if (!F || F->isDeclaration() || F->getReturnType()->isVoidTy()) {
       indicatePessimisticFixpoint();
       return;
     }
-    assert(!F->getReturnType()->isVoidTy() &&
-           "Did not expect a void return type!");
 
     // The map from instruction opcodes to those instructions in the function.
     auto &OpcodeInstMap = A.getInfoCache().getOpcodeInstMapForFunction(*F);
@@ -2117,9 +2101,6 @@ public:
         return;
       }
     }
-
-    if (!A.isFunctionIPOAmendable(*F))
-      indicatePessimisticFixpoint();
   }
 
   /// See AbstractAttribute::manifest(...).
@@ -2425,14 +2406,6 @@ struct AANoSyncCallSite final : AANoSyncImpl {
   AANoSyncCallSite(const IRPosition &IRP, Attributor &A)
       : AANoSyncImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoSyncImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
     // TODO: Once we have call site specific value information we can provide
@@ -2493,14 +2466,6 @@ struct AANoFreeFunction final : public AANoFreeImpl {
 struct AANoFreeCallSite final : AANoFreeImpl {
   AANoFreeCallSite(const IRPosition &IRP, Attributor &A)
       : AANoFreeImpl(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoFreeImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
 
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
@@ -3018,14 +2983,6 @@ struct AANoRecurseCallSite final : AANoRecurseImpl {
   AANoRecurseCallSite(const IRPosition &IRP, Attributor &A)
       : AANoRecurseImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoRecurseImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
     // TODO: Once we have call site specific value information we can provide
@@ -3068,7 +3025,7 @@ struct AANonConvergentFunction final : AANonConvergentImpl {
     // If all function calls are known to not be convergent, we are not convergent.
     auto CalleeIsNotConvergent = [&](Instruction &Inst) {
       CallBase &CB = cast<CallBase>(Inst);
-      Function *Callee = CB.getCalledFunction();
+      auto *Callee = dyn_cast_if_present<Function>(CB.getCalledOperand());
       if (!Callee || Callee->isIntrinsic()) {
         return false;
       }
@@ -3195,7 +3152,7 @@ struct AAUndefinedBehaviorImpl : public AAUndefinedBehavior {
       // Check nonnull and noundef argument attribute violation for each
       // callsite.
       CallBase &CB = cast<CallBase>(I);
-      Function *Callee = CB.getCalledFunction();
+      auto *Callee = dyn_cast_if_present<Function>(CB.getCalledOperand());
       if (!Callee)
         return true;
       for (unsigned idx = 0; idx < CB.arg_size(); idx++) {
@@ -3468,16 +3425,6 @@ struct AAWillReturnImpl : public AAWillReturn {
   AAWillReturnImpl(const IRPosition &IRP, Attributor &A)
       : AAWillReturn(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAWillReturn::initialize(A);
-
-    if (isImpliedByMustprogressAndReadonly(A, /* KnownOnly */ true)) {
-      indicateOptimisticFixpoint();
-      return;
-    }
-  }
-
   /// Check for `mustprogress` and `readonly` as they imply `willreturn`.
   bool isImpliedByMustprogressAndReadonly(Attributor &A, bool KnownOnly) {
     // Check for `mustprogress` in the scope and the associated function which
@@ -3535,7 +3482,8 @@ struct AAWillReturnFunction final : AAWillReturnImpl {
     AAWillReturnImpl::initialize(A);
 
     Function *F = getAnchorScope();
-    if (!F || F->isDeclaration() || mayContainUnboundedCycle(*F, A))
+    assert(F && "Did expect an anchor function");
+    if (F->isDeclaration() || mayContainUnboundedCycle(*F, A))
       indicatePessimisticFixpoint();
   }
 
@@ -3547,14 +3495,6 @@ struct AAWillReturnFunction final : AAWillReturnImpl {
 struct AAWillReturnCallSite final : AAWillReturnImpl {
   AAWillReturnCallSite(const IRPosition &IRP, Attributor &A)
       : AAWillReturnImpl(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAWillReturnImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || !A.isFunctionIPOAmendable(*F))
-      indicatePessimisticFixpoint();
-  }
 
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
@@ -4211,14 +4151,6 @@ struct AANoAliasReturned final : AANoAliasImpl {
   AANoAliasReturned(const IRPosition &IRP, Attributor &A)
       : AANoAliasImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoAliasImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
 
@@ -4258,14 +4190,6 @@ struct AANoAliasCallSiteReturned final : AANoAliasImpl {
   AANoAliasCallSiteReturned(const IRPosition &IRP, Attributor &A)
       : AANoAliasImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoAliasImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
     // TODO: Once we have call site specific value information we can provide
@@ -4291,13 +4215,6 @@ struct AANoAliasCallSiteReturned final : AANoAliasImpl {
 namespace {
 struct AAIsDeadValueImpl : public AAIsDead {
   AAIsDeadValueImpl(const IRPosition &IRP, Attributor &A) : AAIsDead(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    if (auto *Scope = getAnchorScope())
-      if (!A.isRunOn(*Scope))
-        indicatePessimisticFixpoint();
-  }
 
   /// See AAIsDead::isAssumedDead().
   bool isAssumedDead() const override { return isAssumed(IS_DEAD); }
@@ -4537,13 +4454,6 @@ struct AAIsDeadArgument : public AAIsDeadFloating {
   AAIsDeadArgument(const IRPosition &IRP, Attributor &A)
       : AAIsDeadFloating(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAIsDeadFloating::initialize(A);
-    if (!A.isFunctionIPOAmendable(*getAnchorScope()))
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::manifest(...).
   ChangeStatus manifest(Attributor &A) override {
     Argument &Arg = *getAssociatedArgument();
@@ -4707,10 +4617,7 @@ struct AAIsDeadFunction : public AAIsDead {
   /// See AbstractAttribute::initialize(...).
   void initialize(Attributor &A) override {
     Function *F = getAnchorScope();
-    if (!F || F->isDeclaration() || !A.isRunOn(*F)) {
-      indicatePessimisticFixpoint();
-      return;
-    }
+    assert(F && "Did expect an anchor function");
     if (!isAssumedDeadInternalFunction(A)) {
       ToBeExploredFrom.insert(&F->getEntryBlock().front());
       assumeLive(A, F->getEntryBlock());
@@ -4855,7 +4762,7 @@ struct AAIsDeadFunction : public AAIsDead {
     // functions. It can however cause dead functions to be treated as live.
     for (const Instruction &I : BB)
       if (const auto *CB = dyn_cast<CallBase>(&I))
-        if (const Function *F = CB->getCalledFunction())
+        if (auto *F = dyn_cast_if_present<Function>(CB->getCalledOperand()))
           if (F->hasLocalLinkage())
             A.markLiveInternalFunction(*F);
     return true;
@@ -5131,13 +5038,6 @@ struct AADereferenceableImpl : AADereferenceable {
     bool CanBeNull, CanBeFreed;
     takeKnownDerefBytesMaximum(V.getPointerDereferenceableBytes(
         A.getDataLayout(), CanBeNull, CanBeFreed));
-
-    bool IsFnInterface = IRP.isFnInterfaceKind();
-    Function *FnScope = IRP.getAnchorScope();
-    if (IsFnInterface && (!FnScope || !A.isFunctionIPOAmendable(*FnScope))) {
-      indicatePessimisticFixpoint();
-      return;
-    }
 
     if (Instruction *CtxI = getCtxI())
       followUsesInMBEC(*this, A, getState(), *CtxI);
@@ -5434,13 +5334,6 @@ struct AAAlignImpl : AAAlign {
     Value &V = *getAssociatedValue().stripPointerCasts();
     takeKnownMaximum(V.getPointerAlignment(A.getDataLayout()).value());
 
-    if (getIRPosition().isFnInterfaceKind() &&
-        (!getAnchorScope() ||
-         !A.isFunctionIPOAmendable(*getAssociatedFunction()))) {
-      indicatePessimisticFixpoint();
-      return;
-    }
-
     if (Instruction *CtxI = getCtxI())
       followUsesInMBEC(*this, A, getState(), *CtxI);
   }
@@ -5585,14 +5478,6 @@ struct AAAlignReturned final
   using Base = AAReturnedFromReturnedValues<AAAlign, AAAlignImpl>;
   AAAlignReturned(const IRPosition &IRP, Attributor &A) : Base(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    Base::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::trackStatistics()
   void trackStatistics() const override { STATS_DECLTRACK_FNRET_ATTR(aligned) }
 };
@@ -5662,14 +5547,6 @@ struct AAAlignCallSiteReturned final
   AAAlignCallSiteReturned(const IRPosition &IRP, Attributor &A)
       : Base(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    Base::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::trackStatistics()
   void trackStatistics() const override { STATS_DECLTRACK_CS_ATTR(align); }
 };
@@ -5679,14 +5556,6 @@ struct AAAlignCallSiteReturned final
 namespace {
 struct AANoReturnImpl : public AANoReturn {
   AANoReturnImpl(const IRPosition &IRP, Attributor &A) : AANoReturn(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoReturn::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
 
   /// See AbstractAttribute::getAsStr().
   const std::string getAsStr() const override {
@@ -5819,8 +5688,8 @@ struct AAInstanceInfoImpl : public AAInstanceInfo {
       if (auto *CB = dyn_cast<CallBase>(UserI)) {
         // This check is not guaranteeing uniqueness but for now that we cannot
         // end up with two versions of \p U thinking it was one.
-        if (!CB->getCalledFunction() ||
-            !CB->getCalledFunction()->hasLocalLinkage())
+        auto *Callee = dyn_cast_if_present<Function>(CB->getCalledOperand());
+        if (!Callee || !Callee->hasLocalLinkage())
           return true;
         if (!CB->isArgOperand(&U))
           return false;
@@ -5941,12 +5810,6 @@ struct AANoCaptureImpl : public AANoCapture {
       indicateOptimisticFixpoint();
       return;
     }
-    Function *AnchorScope = getAnchorScope();
-    if (isFnInterfaceKind() &&
-        (!AnchorScope || !A.isFunctionIPOAmendable(*AnchorScope))) {
-      indicatePessimisticFixpoint();
-      return;
-    }
 
     // You cannot "capture" null in the default address space.
     if (isa<ConstantPointerNull>(getAssociatedValue()) &&
@@ -5956,7 +5819,7 @@ struct AANoCaptureImpl : public AANoCapture {
     }
 
     const Function *F =
-        isArgumentPosition() ? getAssociatedFunction() : AnchorScope;
+        isArgumentPosition() ? getAssociatedFunction() : getAnchorScope();
 
     // Check what state the associated function can actually capture.
     if (F)
@@ -6526,8 +6389,6 @@ struct AAValueSimplifyArgument final : AAValueSimplifyImpl {
 
   void initialize(Attributor &A) override {
     AAValueSimplifyImpl::initialize(A);
-    if (!getAnchorScope() || getAnchorScope()->isDeclaration())
-      indicatePessimisticFixpoint();
     if (hasAttr({Attribute::InAlloca, Attribute::Preallocated,
                  Attribute::StructRet, Attribute::Nest, Attribute::ByVal},
                 /* IgnoreSubsumingPositions */ true))
@@ -6577,7 +6438,7 @@ struct AAValueSimplifyArgument final : AAValueSimplifyImpl {
     bool Success;
     bool UsedAssumedInformation = false;
     if (hasCallBaseContext() &&
-        getCallBaseContext()->getCalledFunction() == Arg->getParent())
+        getCallBaseContext()->getCalledOperand() == Arg->getParent())
       Success = PredForCallSite(
           AbstractCallSite(&getCallBaseContext()->getCalledOperandUse()));
     else
@@ -6712,10 +6573,7 @@ struct AAValueSimplifyCallSiteReturned : AAValueSimplifyImpl {
   void initialize(Attributor &A) override {
     AAValueSimplifyImpl::initialize(A);
     Function *Fn = getAssociatedFunction();
-    if (!Fn) {
-      indicatePessimisticFixpoint();
-      return;
-    }
+    assert(Fn && "Did expect an associted function");
     for (Argument &Arg : Fn->args()) {
       if (Arg.hasReturnedAttr()) {
         auto IRP = IRPosition::callsite_argument(*cast<CallBase>(getCtxI()),
@@ -7538,7 +7396,9 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
     auto CallSiteCheck = [&](AbstractCallSite ACS) {
       CallBase *CB = ACS.getInstruction();
       return TTI->areTypesABICompatible(
-          CB->getCaller(), CB->getCalledFunction(), ReplacementTypes);
+          CB->getCaller(),
+          dyn_cast_if_present<Function>(CB->getCalledOperand()),
+          ReplacementTypes);
     };
     bool UsedAssumedInformation = false;
     if (!A.checkForAllCallSites(CallSiteCheck, *this, true,
@@ -7620,17 +7480,17 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
       assert(DCArgNo >= 0 && unsigned(DCArgNo) < DC->arg_size() &&
              "Expected a direct call operand for callback call operand");
 
+      Function *DCCallee =
+          dyn_cast_if_present<Function>(DC->getCalledOperand());
       LLVM_DEBUG({
         dbgs() << "[AAPrivatizablePtr] Argument " << *Arg
                << " check if be privatized in the context of its parent ("
                << Arg->getParent()->getName()
                << ")\n[AAPrivatizablePtr] because it is an argument in a "
                   "direct call of ("
-               << DCArgNo << "@" << DC->getCalledFunction()->getName()
-               << ").\n";
+               << DCArgNo << "@" << DCCallee->getName() << ").\n";
       });
 
-      Function *DCCallee = DC->getCalledFunction();
       if (unsigned(DCArgNo) < DCCallee->arg_size()) {
         const auto *DCArgPrivAA = A.getAAFor<AAPrivatizablePtr>(
             *this, IRPosition::argument(*DCCallee->getArg(DCArgNo)),
@@ -7650,7 +7510,7 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
                << Arg->getParent()->getName()
                << ")\n[AAPrivatizablePtr] because it is an argument in a "
                   "direct call of ("
-               << ACS.getInstruction()->getCalledFunction()->getName()
+               << ACS.getInstruction()->getCalledOperand()->getName()
                << ").\n[AAPrivatizablePtr] for which the argument "
                   "privatization is not compatible.\n";
       });
@@ -8134,11 +7994,6 @@ struct AAMemoryBehaviorArgument : AAMemoryBehaviorFloating {
         IRP.hasAttr({Attribute::ByVal}, /* IgnoreSubsumingPositions */ true);
     getKnownStateFromValue(IRP, getState(),
                            /* IgnoreSubsumingPositions */ HasByVal);
-
-    // Initialize the use vector with all direct uses of the associated value.
-    Argument *Arg = getAssociatedArgument();
-    if (!Arg || !A.isFunctionIPOAmendable(*(Arg->getParent())))
-      indicatePessimisticFixpoint();
   }
 
   ChangeStatus manifest(Attributor &A) override {
@@ -8223,11 +8078,7 @@ struct AAMemoryBehaviorCallSiteReturned final : AAMemoryBehaviorFloating {
   /// See AbstractAttribute::initialize(...).
   void initialize(Attributor &A) override {
     AAMemoryBehaviorImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
   }
-
   /// See AbstractAttribute::manifest(...).
   ChangeStatus manifest(Attributor &A) override {
     // We do not annotate returned values.
@@ -8287,14 +8138,6 @@ struct AAMemoryBehaviorFunction final : public AAMemoryBehaviorImpl {
 struct AAMemoryBehaviorCallSite final : AAMemoryBehaviorImpl {
   AAMemoryBehaviorCallSite(const IRPosition &IRP, Attributor &A)
       : AAMemoryBehaviorImpl(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAMemoryBehaviorImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
 
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
@@ -9096,14 +8939,6 @@ struct AAMemoryLocationCallSite final : AAMemoryLocationImpl {
   AAMemoryLocationCallSite(const IRPosition &IRP, Attributor &A)
       : AAMemoryLocationImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAMemoryLocationImpl::initialize(A);
-    Function *F = getAssociatedFunction();
-    if (!F || F->isDeclaration())
-      indicatePessimisticFixpoint();
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
     // TODO: Once we have call site specific value information we can provide
@@ -9373,15 +9208,6 @@ struct AAValueConstantRangeArgument final
       true /* BridgeCallBaseContext */>;
   AAValueConstantRangeArgument(const IRPosition &IRP, Attributor &A)
       : Base(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(..).
-  void initialize(Attributor &A) override {
-    if (!getAnchorScope() || getAnchorScope()->isDeclaration()) {
-      indicatePessimisticFixpoint();
-    } else {
-      Base::initialize(A);
-    }
-  }
 
   /// See AbstractAttribute::trackStatistics()
   void trackStatistics() const override {
@@ -9869,15 +9695,6 @@ struct AAPotentialConstantValuesArgument final
                                                PotentialConstantIntValuesState>;
   AAPotentialConstantValuesArgument(const IRPosition &IRP, Attributor &A)
       : Base(IRP, A) {}
-
-  /// See AbstractAttribute::initialize(..).
-  void initialize(Attributor &A) override {
-    if (!getAnchorScope() || getAnchorScope()->isDeclaration()) {
-      indicatePessimisticFixpoint();
-    } else {
-      Base::initialize(A);
-    }
-  }
 
   /// See AbstractAttribute::trackStatistics()
   void trackStatistics() const override {
@@ -10561,11 +10378,6 @@ struct AANoFPClassFloating : public AANoFPClassImpl {
   AANoFPClassFloating(const IRPosition &IRP, Attributor &A)
       : AANoFPClassImpl(IRP, A) {}
 
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AANoFPClassImpl::initialize(A);
-  }
-
   /// See AbstractAttribute::updateImpl(...).
   ChangeStatus updateImpl(Attributor &A) override {
     SmallVector<AA::ValueAndContext> Values;
@@ -10802,8 +10614,9 @@ struct AACallEdgesFunction : public AACallEdgesImpl {
 
 struct AAInterFnReachabilityFunction
     : public CachedReachabilityAA<AAInterFnReachability, Function> {
+  using Base = CachedReachabilityAA<AAInterFnReachability, Function>;
   AAInterFnReachabilityFunction(const IRPosition &IRP, Attributor &A)
-      : CachedReachabilityAA<AAInterFnReachability, Function>(IRP, A) {}
+      : Base(IRP, A) {}
 
   bool instructionCanReach(
       Attributor &A, const Instruction &From, const Function &To,
@@ -11481,14 +11294,15 @@ struct AAPotentialValuesFloating : AAPotentialValuesImpl {
       if (V->getType()->isPointerTy()) {
         NewV = AA::getWithType(*V->stripPointerCasts(), *V->getType());
       } else {
-        auto *CB = dyn_cast<CallBase>(V);
-        if (CB && CB->getCalledFunction()) {
-          for (Argument &Arg : CB->getCalledFunction()->args())
-            if (Arg.hasReturnedAttr()) {
-              NewV = CB->getArgOperand(Arg.getArgNo());
-              break;
-            }
-        }
+        if (auto *CB = dyn_cast<CallBase>(V))
+          if (auto *Callee =
+                  dyn_cast_if_present<Function>(CB->getCalledOperand())) {
+            for (Argument &Arg : Callee->args())
+              if (Arg.hasReturnedAttr()) {
+                NewV = CB->getArgOperand(Arg.getArgNo());
+                break;
+              }
+          }
       }
       if (NewV && NewV != V) {
         Worklist.push_back({{*NewV, CtxI}, S});
@@ -11706,7 +11520,7 @@ struct AAPotentialValuesCallSiteReturned : AAPotentialValuesImpl {
           SmallVector<AA::ValueAndContext> ArgValues;
           IRPosition IRP = IRPosition::value(*V);
           if (auto *Arg = dyn_cast<Argument>(V))
-            if (Arg->getParent() == CB->getCalledFunction())
+            if (Arg->getParent() == CB->getCalledOperand())
               IRP = IRPosition::callsite_argument(*CB, Arg->getArgNo());
           if (recurseForValue(A, IRP, AA::AnyScope))
             continue;

@@ -4503,11 +4503,13 @@ static bool getUniformBase(const Value *Ptr, SDValue &Base, SDValue &Index,
   if (BasePtr->getType()->isVectorTy() || !IndexVal->getType()->isVectorTy())
     return false;
 
-  uint64_t ScaleVal = DL.getTypeAllocSize(GEP->getResultElementType());
+  TypeSize ScaleVal = DL.getTypeAllocSize(GEP->getResultElementType());
+  if (ScaleVal.isScalable())
+    return false;
 
   // Target may not support the required addressing mode.
   if (ScaleVal != 1 &&
-      !TLI.isLegalScaleForGatherScatter(ScaleVal, ElemSize))
+      !TLI.isLegalScaleForGatherScatter(ScaleVal.getFixedValue(), ElemSize))
     return false;
 
   Base = SDB->getValue(BasePtr);
@@ -6463,6 +6465,14 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                              getValue(I.getArgOperand(0)),
                              getValue(I.getArgOperand(1)), Flags));
     return;
+  case Intrinsic::frexp: {
+    SmallVector<EVT, 2> ValueVTs;
+    ComputeValueVTs(TLI, DAG.getDataLayout(), I.getType(), ValueVTs);
+    SDVTList VTs = DAG.getVTList(ValueVTs);
+    setValue(&I,
+             DAG.getNode(ISD::FFREXP, sdl, VTs, getValue(I.getArgOperand(0))));
+    return;
+  }
   case Intrinsic::arithmetic_fence: {
     setValue(&I, DAG.getNode(ISD::ARITH_FENCE, sdl,
                              getValue(I.getArgOperand(0)).getValueType(),

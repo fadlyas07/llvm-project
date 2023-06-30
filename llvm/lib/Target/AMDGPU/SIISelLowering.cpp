@@ -476,6 +476,7 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FFLOOR, MVT::f64, Legal);
   setOperationAction({ISD::FLDEXP, ISD::STRICT_FLDEXP}, {MVT::f32, MVT::f64},
                      Legal);
+  setOperationAction(ISD::FFREXP, {MVT::f32, MVT::f64}, Custom);
 
   setOperationAction({ISD::FSIN, ISD::FCOS, ISD::FDIV}, MVT::f32, Custom);
   setOperationAction(ISD::FDIV, MVT::f64, Custom);
@@ -520,9 +521,9 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
     AddPromotedToType(ISD::STORE, MVT::f16, MVT::i16);
 
     // F16 - VOP1 Actions.
-    setOperationAction(
-        {ISD::FP_ROUND, ISD::FCOS, ISD::FSIN, ISD::FROUND, ISD::FPTRUNC_ROUND},
-        MVT::f16, Custom);
+    setOperationAction({ISD::FP_ROUND, ISD::STRICT_FP_ROUND, ISD::FCOS,
+                        ISD::FSIN, ISD::FROUND, ISD::FPTRUNC_ROUND},
+                       MVT::f16, Custom);
 
     setOperationAction({ISD::SINT_TO_FP, ISD::UINT_TO_FP}, MVT::i16, Custom);
 
@@ -533,6 +534,7 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
     // F16 - VOP2 Actions.
     setOperationAction({ISD::BR_CC, ISD::SELECT_CC}, MVT::f16, Expand);
     setOperationAction({ISD::FLDEXP, ISD::STRICT_FLDEXP}, MVT::f16, Custom);
+    setOperationAction(ISD::FFREXP, MVT::f16, Custom);
     setOperationAction(ISD::FDIV, MVT::f16, Custom);
 
     // F16 - VOP3 Actions.
@@ -3198,21 +3200,6 @@ SDValue SITargetLowering::LowerCall(CallLoweringInfo &CLI,
                               "unsupported required tail call to function ");
   }
 
-  if (AMDGPU::isShader(CallConv)) {
-    // Note the issue is with the CC of the called function, not of the call
-    // itself.
-    return lowerUnhandledCall(CLI, InVals,
-                              "unsupported call to a shader function ");
-  }
-
-  if (AMDGPU::isShader(MF.getFunction().getCallingConv()) &&
-      CallConv != CallingConv::AMDGPU_Gfx) {
-    // Only allow calls with specific calling conventions.
-    return lowerUnhandledCall(CLI, InVals,
-                              "unsupported calling convention for call from "
-                              "graphics shader of function ");
-  }
-
   if (IsTailCall) {
     IsTailCall = isEligibleForTailCallOptimization(
       Callee, CallConv, IsVarArg, Outs, OutVals, Ins, DAG);
@@ -4822,6 +4809,7 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     return LowerTrig(Op, DAG);
   case ISD::SELECT: return LowerSELECT(Op, DAG);
   case ISD::FDIV: return LowerFDIV(Op, DAG);
+  case ISD::FFREXP: return LowerFFREXP(Op, DAG);
   case ISD::ATOMIC_CMP_SWAP: return LowerATOMIC_CMP_SWAP(Op, DAG);
   case ISD::STORE: return LowerSTORE(Op, DAG);
   case ISD::GlobalAddress: {
@@ -4846,6 +4834,7 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::BUILD_VECTOR:
     return lowerBUILD_VECTOR(Op, DAG);
   case ISD::FP_ROUND:
+  case ISD::STRICT_FP_ROUND:
     return lowerFP_ROUND(Op, DAG);
   case ISD::FPTRUNC_ROUND: {
     unsigned Opc;
@@ -5474,6 +5463,10 @@ SDValue SITargetLowering::lowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const {
   SDValue Src = Op.getOperand(0);
   EVT SrcVT = Src.getValueType();
   if (SrcVT != MVT::f64)
+    return Op;
+
+  // TODO: Handle strictfp
+  if (Op.getOpcode() != ISD::FP_ROUND)
     return Op;
 
   SDLoc DL(Op);
@@ -9512,6 +9505,38 @@ SDValue SITargetLowering::LowerFDIV(SDValue Op, SelectionDAG &DAG) const {
     return LowerFDIV16(Op, DAG);
 
   llvm_unreachable("Unexpected type for fdiv");
+}
+
+SDValue SITargetLowering::LowerFFREXP(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc dl(Op);
+  SDValue Val = Op.getOperand(0);
+  EVT VT = Val.getValueType();
+  EVT ResultExpVT = Op->getValueType(1);
+  EVT InstrExpVT = VT == MVT::f16 ? MVT::i16 : MVT::i32;
+
+  SDValue Mant = DAG.getNode(
+      ISD::INTRINSIC_WO_CHAIN, dl, VT,
+      DAG.getTargetConstant(Intrinsic::amdgcn_frexp_mant, dl, MVT::i32), Val);
+
+  SDValue Exp = DAG.getNode(
+      ISD::INTRINSIC_WO_CHAIN, dl, InstrExpVT,
+      DAG.getTargetConstant(Intrinsic::amdgcn_frexp_exp, dl, MVT::i32), Val);
+
+  const GCNSubtarget &ST =
+      DAG.getMachineFunction().getSubtarget<GCNSubtarget>();
+  if (ST.hasFractBug()) {
+    SDValue Fabs = DAG.getNode(ISD::FABS, dl, VT, Val);
+    SDValue Inf = DAG.getConstantFP(
+        APFloat::getInf(SelectionDAG::EVTToAPFloatSemantics(VT)), dl, VT);
+
+    SDValue IsFinite = DAG.getSetCC(dl, MVT::i1, Fabs, Inf, ISD::SETOLT);
+    SDValue Zero = DAG.getConstant(0, dl, InstrExpVT);
+    Exp = DAG.getNode(ISD::SELECT, dl, InstrExpVT, IsFinite, Exp, Zero);
+    Mant = DAG.getNode(ISD::SELECT, dl, VT, IsFinite, Mant, Val);
+  }
+
+  SDValue CastExp = DAG.getSExtOrTrunc(Exp, dl, ResultExpVT);
+  return DAG.getMergeValues({Mant, CastExp}, dl);
 }
 
 SDValue SITargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
