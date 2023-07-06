@@ -73,6 +73,10 @@ protected:
   SDValue LowerFLOG10(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFLOGUnsafe(SDValue Op, const SDLoc &SL, SelectionDAG &DAG,
                           double Log2BaseInverted, SDNodeFlags Flags) const;
+  SDValue lowerFEXP2(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue lowerFEXPUnsafe(SDValue Op, const SDLoc &SL, SelectionDAG &DAG,
+                          SDNodeFlags Flags) const;
   SDValue lowerFEXP(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue LowerCTLZ_CTTZ(SDValue Op, SelectionDAG &DAG) const;
