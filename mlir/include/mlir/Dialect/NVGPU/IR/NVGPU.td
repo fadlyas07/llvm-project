@@ -38,7 +38,8 @@ def NVGPU_Dialect : Dialect {
 
   let useDefaultTypePrinterParser = 1;
   let usePropertiesForAttributes = 1;
-
+  let useDefaultAttributePrinterParser = 1;
+  
   let extraClassDeclaration = [{
     /// Return true if the given MemRefType has an integer address
     /// space that matches the NVVM shared memory address space or
@@ -598,6 +599,30 @@ def NVGPU_TmaAsyncLoadOp : NVGPU_Op<"tma.async.load", []> {
   }];
   let hasVerifier = 1;
 
+}
+
+def NVGPU_TmaCreateDescriptorOp : NVGPU_Op<"tma.create.descriptor", []> {
+  let summary = "TMA create descriptor";
+  let description = [{
+    The Op creates a tensor map descriptor object representing tiled memory 
+    region. To do that it calls CUDA Driver's `cuTensorMapEncodeTiled`. The 
+    descriptor is used by Tensor Memory Access (TMA).
+
+    The `tensor` is the source tensor to be tiled. 
+
+    The `boxDimensions` is the size of the tiled memory region in each dimension.
+
+    For more information see below:
+    https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html
+  }];
+
+  let arguments = (ins AnyUnrankedMemRef:$tensor,
+                       Variadic<Index>:$boxDimensions);
+  let results = (outs NVGPU_TensorMapDescriptor:$tensorMap);
+  let assemblyFormat = [{
+         $tensor `box` `[` $boxDimensions `]` attr-dict `:` type($tensor) `->` type($tensorMap)
+  }];
+  let hasVerifier = 1;
 }
 
 #endif // NVGPU
