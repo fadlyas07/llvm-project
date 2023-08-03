@@ -632,6 +632,10 @@ def IncludeOp : TransformDialectOp<"include",
     ::mlir::Operation::operand_range getArgOperands() {
       return getOperands();
     }
+
+    ::mlir::MutableOperandRange getArgOperandsMutable() {
+      return getOperandsMutable();
+    }
   }];
 }
 
@@ -830,7 +834,8 @@ def ParamConstantOp : Op<Transform_Dialect, "param.constant", [
 
 def PrintOp : TransformDialectOp<"print",
     [DeclareOpInterfaceMethods<TransformOpInterface>,
-     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+     MatchOpInterface]> {
   let summary = "Dump each payload op";
   let description = [{
     This op dumps each payload op that is associated with the `target` operand

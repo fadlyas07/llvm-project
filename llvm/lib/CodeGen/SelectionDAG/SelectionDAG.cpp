@@ -1947,13 +1947,10 @@ SDValue SelectionDAG::getVScale(const SDLoc &DL, EVT VT, APInt MulImm,
 
   if (ConstantFold) {
     const MachineFunction &MF = getMachineFunction();
-    auto Attr = MF.getFunction().getFnAttribute(Attribute::VScaleRange);
-    if (Attr.isValid()) {
-      unsigned VScaleMin = Attr.getVScaleRangeMin();
-      if (std::optional<unsigned> VScaleMax = Attr.getVScaleRangeMax())
-        if (*VScaleMax == VScaleMin)
-          return getConstant(MulImm * VScaleMin, DL, VT);
-    }
+    const Function &F = MF.getFunction();
+    ConstantRange CR = getVScaleRange(&F, 64);
+    if (const APInt *C = CR.getSingleElement())
+      return getConstant(MulImm * C->getZExtValue(), DL, VT);
   }
 
   return getNode(ISD::VSCALE, DL, VT, getConstant(MulImm, DL, VT));
@@ -5694,6 +5691,22 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     if (OpOpcode == ISD::UNDEF)
       // zext(undef) = 0, because the top bits will be zero.
       return getConstant(0, DL, VT);
+
+    // Skip unnecessary zext_inreg pattern:
+    // (zext (trunc (assertzext x))) -> (assertzext x)
+    // TODO: Generalize to MaskedValueIsZero check?
+    if (OpOpcode == ISD::TRUNCATE) {
+      SDValue OpOp = N1.getOperand(0);
+      if (OpOp.getValueType() == VT) {
+        if (OpOp.getOpcode() == ISD::AssertZext && N1->hasOneUse()) {
+          EVT ExtVT = cast<VTSDNode>(OpOp.getOperand(1))->getVT();
+          if (N1.getScalarValueSizeInBits() >= ExtVT.getSizeInBits()) {
+            transferDbgValues(N1, OpOp);
+            return OpOp;
+          }
+        }
+      }
+    }
     break;
   case ISD::ANY_EXTEND:
     assert(VT.isInteger() && N1.getValueType().isInteger() &&

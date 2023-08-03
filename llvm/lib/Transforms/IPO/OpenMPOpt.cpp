@@ -3806,12 +3806,23 @@ struct AAKernelInfoFunction : AAKernelInfo {
 
     ChangeStatus Changed = ChangeStatus::UNCHANGED;
 
-    // If we can we change the execution mode to SPMD-mode otherwise we build a
-    // custom state machine.
+    bool HasBuiltStateMachine = true;
     if (!changeToSPMDMode(A, Changed)) {
       if (!KernelInitCB->getCalledFunction()->isDeclaration())
-        Changed |= buildCustomStateMachine(A);
+        HasBuiltStateMachine = buildCustomStateMachine(A, Changed);
+      else
+        HasBuiltStateMachine = false;
     }
+
+    // We need to reset KernelEnvC if specific rewriting is not done.
+    ConstantStruct *ExistingKernelEnvC =
+        KernelInfo::getKernelEnvironementFromKernelInitCB(KernelInitCB);
+    ConstantInt *OldUseGenericStateMachineVal =
+        KernelInfo::getUseGenericStateMachineFromKernelEnvironment(
+            ExistingKernelEnvC);
+    if (!HasBuiltStateMachine)
+      setUseGenericStateMachineOfKernelEnvironment(
+          OldUseGenericStateMachineVal);
 
     // At last, update the KernelEnvc
     GlobalVariable *KernelEnvGV =
@@ -4180,21 +4191,21 @@ struct AAKernelInfoFunction : AAKernelInfo {
     return true;
   };
 
-  ChangeStatus buildCustomStateMachine(Attributor &A) {
+  bool buildCustomStateMachine(Attributor &A, ChangeStatus &Changed) {
     // If we have disabled state machine rewrites, don't make a custom one
     if (DisableOpenMPOptStateMachineRewrite)
-      return ChangeStatus::UNCHANGED;
+      return false;
 
     // Don't rewrite the state machine if we are not in a valid state.
     if (!ReachedKnownParallelRegions.isValidState())
-      return ChangeStatus::UNCHANGED;
+      return false;
 
     auto &OMPInfoCache = static_cast<OMPInformationCache &>(A.getInfoCache());
     if (!OMPInfoCache.runtimeFnsAvailable(
             {OMPRTL___kmpc_get_hardware_num_threads_in_block,
              OMPRTL___kmpc_get_warp_size, OMPRTL___kmpc_barrier_simple_generic,
              OMPRTL___kmpc_kernel_parallel, OMPRTL___kmpc_kernel_end_parallel}))
-      return ChangeStatus::UNCHANGED;
+      return false;
 
     ConstantStruct *ExistingKernelEnvC =
         KernelInfo::getKernelEnvironementFromKernelInitCB(KernelInitCB);
@@ -4214,7 +4225,9 @@ struct AAKernelInfoFunction : AAKernelInfo {
     // reachable by the kernel.
     if (UseStateMachineC->isZero() ||
         (ModeC->getSExtValue() & OMP_TGT_EXEC_MODE_SPMD))
-      return ChangeStatus::UNCHANGED;
+      return false;
+
+    Changed = ChangeStatus::CHANGED;
 
     // If not SPMD mode, indicate we use a custom state machine now.
     setUseGenericStateMachineOfKernelEnvironment(
@@ -4232,7 +4245,7 @@ struct AAKernelInfoFunction : AAKernelInfo {
       };
       A.emitRemark<OptimizationRemark>(KernelInitCB, "OMP130", Remark);
 
-      return ChangeStatus::CHANGED;
+      return true;
     }
 
     // Keep track in the statistics of our new shiny custom state machine.
@@ -4368,7 +4381,7 @@ struct AAKernelInfoFunction : AAKernelInfo {
 
     // Create local storage for the work function pointer.
     const DataLayout &DL = M.getDataLayout();
-    Type *VoidPtrTy = Type::getInt8PtrTy(Ctx);
+    Type *VoidPtrTy = PointerType::getUnqual(Ctx);
     Instruction *WorkFnAI =
         new AllocaInst(VoidPtrTy, DL.getAllocaAddrSpace(), nullptr,
                        "worker.work_fn.addr", &Kernel->getEntryBlock().front());
@@ -4499,7 +4512,7 @@ struct AAKernelInfoFunction : AAKernelInfo {
     BranchInst::Create(StateMachineBeginBB, StateMachineDoneBarrierBB)
         ->setDebugLoc(DLoc);
 
-    return ChangeStatus::CHANGED;
+    return true;
   }
 
   /// Fixpoint iteration update function. Will be called every time a dependence

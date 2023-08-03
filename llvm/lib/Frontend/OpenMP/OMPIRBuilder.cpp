@@ -4332,13 +4332,37 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
   return Builder.saveIP();
 }
 
+// Copy input from pointer or i64 to the expected argument type.
+static Value *copyInput(IRBuilderBase &Builder, unsigned AddrSpace,
+                        Value *Input, Argument &Arg) {
+  auto Addr = Builder.CreateAlloca(Arg.getType()->isPointerTy()
+                                       ? Arg.getType()
+                                       : Type::getInt64Ty(Builder.getContext()),
+                                   AddrSpace);
+  auto AddrAscast =
+      Builder.CreatePointerBitCastOrAddrSpaceCast(Addr, Input->getType());
+  Builder.CreateStore(&Arg, AddrAscast);
+  auto Copy = Builder.CreateLoad(Arg.getType(), AddrAscast);
+
+  return Copy;
+}
+
 static Function *
 createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                        StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
                        OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
   SmallVector<Type *> ParameterTypes;
-  for (auto &Arg : Inputs)
-    ParameterTypes.push_back(Arg->getType());
+  if (OMPBuilder.Config.isTargetDevice()) {
+    // All parameters to target devices are passed as pointers
+    // or i64. This assumes 64-bit address spaces/pointers.
+    for (auto &Arg : Inputs)
+      ParameterTypes.push_back(Arg->getType()->isPointerTy()
+                                   ? Arg->getType()
+                                   : Type::getInt64Ty(Builder.getContext()));
+  } else {
+    for (auto &Arg : Inputs)
+      ParameterTypes.push_back(Arg->getType());
+  }
 
   auto FuncType = FunctionType::get(Builder.getVoidTy(), ParameterTypes,
                                     /*isVarArg*/ false);
@@ -4356,9 +4380,10 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   if (OMPBuilder.Config.isTargetDevice())
     Builder.restoreIP(OMPBuilder.createTargetInit(Builder, /*IsSPMD*/ false));
 
-  Builder.restoreIP(CBFunc(Builder.saveIP(), Builder.saveIP()));
+  BasicBlock *UserCodeEntryBB = Builder.GetInsertBlock();
 
   // Insert target deinit call in the device compilation pass.
+  Builder.restoreIP(CBFunc(Builder.saveIP(), Builder.saveIP()));
   if (OMPBuilder.Config.isTargetDevice())
     OMPBuilder.createTargetDeinit(Builder);
 
@@ -4366,15 +4391,23 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   Builder.CreateRetVoid();
 
   // Rewrite uses of input valus to parameters.
+  Builder.SetInsertPoint(UserCodeEntryBB->getFirstNonPHIOrDbg());
   for (auto InArg : zip(Inputs, Func->args())) {
     Value *Input = std::get<0>(InArg);
     Argument &Arg = std::get<1>(InArg);
+
+    Value *InputCopy =
+        OMPBuilder.Config.isTargetDevice()
+            ? copyInput(Builder,
+                        OMPBuilder.M.getDataLayout().getAllocaAddrSpace(),
+                        Input, Arg)
+            : &Arg;
 
     // Collect all the instructions
     for (User *User : make_early_inc_range(Input->users()))
       if (auto Instr = dyn_cast<Instruction>(User))
         if (Instr->getFunction() == Func)
-          Instr->replaceUsesOfWith(Input, &Arg);
+          Instr->replaceUsesOfWith(Input, InputCopy);
   }
 
   // Restore insert point.
@@ -4552,10 +4585,11 @@ void OpenMPIRBuilder::emitOffloadingArraysArgument(IRBuilderBase &Builder,
                                                    bool ForEndCall) {
   assert((!ForEndCall || Info.separateBeginEndCalls()) &&
          "expected region end call to runtime only when end call is separate");
-  auto VoidPtrTy = Type::getInt8PtrTy(M.getContext());
-  auto VoidPtrPtrTy = VoidPtrTy->getPointerTo(0);
+  auto UnqualPtrTy = PointerType::getUnqual(M.getContext());
+  auto VoidPtrTy = UnqualPtrTy;
+  auto VoidPtrPtrTy = UnqualPtrTy;
   auto Int64Ty = Type::getInt64Ty(M.getContext());
-  auto Int64PtrTy = Type::getInt64PtrTy(M.getContext());
+  auto Int64PtrTy = UnqualPtrTy;
 
   if (!Info.NumberOfPtrs) {
     RTArgs.BasePointersArray = ConstantPointerNull::get(VoidPtrPtrTy);
@@ -4704,7 +4738,7 @@ void OpenMPIRBuilder::emitOffloadingArrays(
   // need to fill up the arrays as we do for the pointers.
   Type *Int64Ty = Builder.getInt64Ty();
   SmallVector<Constant *> ConstSizes(CombinedInfo.Sizes.size(),
-                                     ConstantInt::get(Builder.getInt64Ty(), 0));
+                                     ConstantInt::get(Int64Ty, 0));
   SmallBitVector RuntimeSizes(CombinedInfo.Sizes.size());
   for (unsigned I = 0, E = CombinedInfo.Sizes.size(); I < E; ++I) {
     if (auto *CI = dyn_cast<Constant>(CombinedInfo.Sizes[I])) {
@@ -4713,7 +4747,7 @@ void OpenMPIRBuilder::emitOffloadingArrays(
             static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
                 CombinedInfo.Types[I] &
                 OpenMPOffloadMappingFlags::OMP_MAP_NON_CONTIG))
-          ConstSizes[I] = ConstantInt::get(Builder.getInt64Ty(),
+          ConstSizes[I] = ConstantInt::get(Int64Ty,
                                            CombinedInfo.NonContigInfo.Dims[I]);
         else
           ConstSizes[I] = CI;
@@ -4747,11 +4781,9 @@ void OpenMPIRBuilder::emitOffloadingArrays(
           SizeArrayType, /* ArraySize = */ nullptr, ".offload_sizes");
       Buffer->setAlignment(OffloadSizeAlign);
       Builder.restoreIP(CodeGenIP);
-      Value *GblConstPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
-          SizesArrayGbl, Int64Ty->getPointerTo());
       Builder.CreateMemCpy(
           Buffer, M.getDataLayout().getPrefTypeAlign(Buffer->getType()),
-          GblConstPtr, OffloadSizeAlign,
+          SizesArrayGbl, OffloadSizeAlign,
           Builder.getIntN(
               IndexSize,
               Buffer->getAllocationSize(M.getDataLayout())->getFixedValue()));
@@ -4780,7 +4812,7 @@ void OpenMPIRBuilder::emitOffloadingArrays(
     Info.RTArgs.MapNamesArray = MapNamesArrayGbl;
   } else {
     Info.RTArgs.MapNamesArray = Constant::getNullValue(
-        Type::getInt8Ty(Builder.getContext())->getPointerTo());
+        PointerType::getUnqual(Builder.getContext()));
   }
 
   // If there's a present map type modifier, it must not be applied to the end
@@ -4801,22 +4833,20 @@ void OpenMPIRBuilder::emitOffloadingArrays(
     }
   }
 
+  PointerType *PtrTy = Builder.getPtrTy();
   for (unsigned I = 0; I < Info.NumberOfPtrs; ++I) {
     Value *BPVal = CombinedInfo.BasePointers[I];
     Value *BP = Builder.CreateConstInBoundsGEP2_32(
-        ArrayType::get(Builder.getInt8PtrTy(), Info.NumberOfPtrs),
+        ArrayType::get(PtrTy, Info.NumberOfPtrs),
         Info.RTArgs.BasePointersArray, 0, I);
-    BP = Builder.CreatePointerBitCastOrAddrSpaceCast(
-        BP, BPVal->getType()->getPointerTo(/*AddrSpace=*/0));
     Builder.CreateAlignedStore(
-        BPVal, BP, M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+        BPVal, BP, M.getDataLayout().getPrefTypeAlign(PtrTy));
 
     if (Info.requiresDevicePointerInfo()) {
       if (CombinedInfo.DevicePointers[I] == DeviceInfoTy::Pointer) {
         CodeGenIP = Builder.saveIP();
         Builder.restoreIP(AllocaIP);
-        Info.DevicePtrInfoMap[BPVal] = {
-            BP, Builder.CreateAlloca(Builder.getPtrTy())};
+        Info.DevicePtrInfoMap[BPVal] = {BP, Builder.CreateAlloca(PtrTy)};
         Builder.restoreIP(CodeGenIP);
         assert(DeviceAddrCB &&
                "DeviceAddrCB missing for DevicePtr code generation");
@@ -4831,13 +4861,11 @@ void OpenMPIRBuilder::emitOffloadingArrays(
 
     Value *PVal = CombinedInfo.Pointers[I];
     Value *P = Builder.CreateConstInBoundsGEP2_32(
-        ArrayType::get(Builder.getInt8PtrTy(), Info.NumberOfPtrs),
+        ArrayType::get(PtrTy, Info.NumberOfPtrs),
         Info.RTArgs.PointersArray, 0, I);
-    P = Builder.CreatePointerBitCastOrAddrSpaceCast(
-        P, PVal->getType()->getPointerTo(/*AddrSpace=*/0));
     // TODO: Check alignment correct.
     Builder.CreateAlignedStore(
-        PVal, P, M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+        PVal, P, M.getDataLayout().getPrefTypeAlign(PtrTy));
 
     if (RuntimeSizes.test(I)) {
       Value *S = Builder.CreateConstInBoundsGEP2_32(
@@ -4847,14 +4875,14 @@ void OpenMPIRBuilder::emitOffloadingArrays(
       Builder.CreateAlignedStore(
           Builder.CreateIntCast(CombinedInfo.Sizes[I], Int64Ty,
                                 /*isSigned=*/true),
-          S, M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+          S, M.getDataLayout().getPrefTypeAlign(PtrTy));
     }
     // Fill up the mapper array.
     unsigned IndexSize = M.getDataLayout().getIndexSizeInBits(0);
-    Value *MFunc = ConstantPointerNull::get(Builder.getInt8PtrTy());
+    Value *MFunc = ConstantPointerNull::get(PtrTy);
     if (CustomMapperCB)
       if (Value *CustomMFunc = CustomMapperCB(I))
-        MFunc = Builder.CreatePointerCast(CustomMFunc, Builder.getInt8PtrTy());
+        MFunc = Builder.CreatePointerCast(CustomMFunc, PtrTy);
     Value *MAddr = Builder.CreateInBoundsGEP(
         MappersArray->getAllocatedType(), MappersArray,
         {Builder.getIntN(IndexSize, 0), Builder.getIntN(IndexSize, I)});
@@ -5450,7 +5478,7 @@ OpenMPIRBuilder::createOffloadMapnames(SmallVectorImpl<llvm::Constant *> &Names,
                                        std::string VarName) {
   llvm::Constant *MapNamesArrayInit = llvm::ConstantArray::get(
       llvm::ArrayType::get(
-          llvm::Type::getInt8Ty(M.getContext())->getPointerTo(), Names.size()),
+          llvm::PointerType::getUnqual(M.getContext()), Names.size()),
       Names);
   auto *MapNamesArrayGlobal = new llvm::GlobalVariable(
       M, MapNamesArrayInit->getType(),

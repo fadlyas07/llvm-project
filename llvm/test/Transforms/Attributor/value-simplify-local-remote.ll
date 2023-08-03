@@ -380,25 +380,18 @@ define dso_local void @spam() {
 ; TUNIT-NEXT:    store i32 [[X]], ptr [[TMP]], align 4
 ; TUNIT-NEXT:    br label [[BB16:%.*]]
 ; TUNIT:       bb16:
-; TUNIT-NEXT:    [[TMP18:%.*]] = icmp eq i32 [[X]], 0
-; TUNIT-NEXT:    br i1 [[TMP18]], label [[BB35:%.*]], label [[BB19:%.*]]
+; TUNIT-NEXT:    [[TRUETMP18:%.*]] = icmp eq i32 [[X]], 0
+; TUNIT-NEXT:    br i1 [[TRUETMP18]], label [[BB35:%.*]], label [[BB19:%.*]]
 ; TUNIT:       bb19:
-; TUNIT-NEXT:    [[TMP21:%.*]] = load float, ptr [[TMP]], align 4
-; TUNIT-NEXT:    [[TMP22:%.*]] = fadd fast float [[TMP21]], 0.000000e+00
 ; TUNIT-NEXT:    br label [[BB23:%.*]]
 ; TUNIT:       bb23:
-; TUNIT-NEXT:    [[TMP24:%.*]] = phi <2 x float> [ undef, [[BB19]] ], [ [[TMP26:%.*]], [[BB34:%.*]] ]
 ; TUNIT-NEXT:    br label [[BB25:%.*]]
 ; TUNIT:       bb25:
-; TUNIT-NEXT:    [[TMP26]] = phi <2 x float> [ [[TMP30:%.*]], [[BB28:%.*]] ], [ [[TMP24]], [[BB23]] ]
-; TUNIT-NEXT:    [[TMP27:%.*]] = icmp ult i32 undef, 8
-; TUNIT-NEXT:    br i1 [[TMP27]], label [[BB28]], label [[BB34]]
+; TUNIT-NEXT:    unreachable
 ; TUNIT:       bb28:
-; TUNIT-NEXT:    [[TMP29:%.*]] = insertelement <2 x float> [[TMP26]], float undef, i32 0
-; TUNIT-NEXT:    [[TMP30]] = insertelement <2 x float> [[TMP29]], float [[TMP22]], i32 1
-; TUNIT-NEXT:    br label [[BB25]]
+; TUNIT-NEXT:    unreachable
 ; TUNIT:       bb34:
-; TUNIT-NEXT:    br label [[BB23]]
+; TUNIT-NEXT:    unreachable
 ; TUNIT:       bb35:
 ; TUNIT-NEXT:    unreachable
 ;
@@ -411,25 +404,18 @@ define dso_local void @spam() {
 ; CGSCC-NEXT:    store i32 [[X]], ptr [[TMP]], align 4
 ; CGSCC-NEXT:    br label [[BB16:%.*]]
 ; CGSCC:       bb16:
-; CGSCC-NEXT:    [[TMP18:%.*]] = icmp eq i32 [[X]], 0
-; CGSCC-NEXT:    br i1 [[TMP18]], label [[BB35:%.*]], label [[BB19:%.*]]
+; CGSCC-NEXT:    [[TRUETMP18:%.*]] = icmp eq i32 [[X]], 0
+; CGSCC-NEXT:    br i1 [[TRUETMP18]], label [[BB35:%.*]], label [[BB19:%.*]]
 ; CGSCC:       bb19:
-; CGSCC-NEXT:    [[TMP21:%.*]] = load float, ptr [[TMP]], align 4
-; CGSCC-NEXT:    [[TMP22:%.*]] = fadd fast float [[TMP21]], 0.000000e+00
 ; CGSCC-NEXT:    br label [[BB23:%.*]]
 ; CGSCC:       bb23:
-; CGSCC-NEXT:    [[TMP24:%.*]] = phi <2 x float> [ undef, [[BB19]] ], [ [[TMP26:%.*]], [[BB34:%.*]] ]
 ; CGSCC-NEXT:    br label [[BB25:%.*]]
 ; CGSCC:       bb25:
-; CGSCC-NEXT:    [[TMP26]] = phi <2 x float> [ [[TMP30:%.*]], [[BB28:%.*]] ], [ [[TMP24]], [[BB23]] ]
-; CGSCC-NEXT:    [[TMP27:%.*]] = icmp ult i32 undef, 8
-; CGSCC-NEXT:    br i1 [[TMP27]], label [[BB28]], label [[BB34]]
+; CGSCC-NEXT:    unreachable
 ; CGSCC:       bb28:
-; CGSCC-NEXT:    [[TMP29:%.*]] = insertelement <2 x float> [[TMP26]], float undef, i32 0
-; CGSCC-NEXT:    [[TMP30]] = insertelement <2 x float> [[TMP29]], float [[TMP22]], i32 1
-; CGSCC-NEXT:    br label [[BB25]]
+; CGSCC-NEXT:    unreachable
 ; CGSCC:       bb34:
-; CGSCC-NEXT:    br label [[BB23]]
+; CGSCC-NEXT:    unreachable
 ; CGSCC:       bb35:
 ; CGSCC-NEXT:    unreachable
 ;
@@ -625,7 +611,7 @@ entry:
 ; CGSCC: attributes #[[ATTR4]] = { mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite) }
 ; CGSCC: attributes #[[ATTR5]] = { nofree norecurse noreturn nosync nounwind memory(none) }
 ; CGSCC: attributes #[[ATTR6]] = { nofree nounwind willreturn memory(write) }
-; CGSCC: attributes #[[ATTR7]] = { nofree willreturn }
+; CGSCC: attributes #[[ATTR7]] = { nofree nosync willreturn }
 ; CGSCC: attributes #[[ATTR8]] = { nofree nounwind willreturn }
 ; CGSCC: attributes #[[ATTR9]] = { nofree nounwind willreturn memory(readwrite) }
 ;.

@@ -545,9 +545,13 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   case CK_Alderlake:
   case CK_Raptorlake:
   case CK_Meteorlake:
+  case CK_Arrowlake:
+  case CK_ArrowlakeS:
+  case CK_Lunarlake:
   case CK_Sierraforest:
   case CK_Grandridge:
   case CK_Graniterapids:
+  case CK_GraniterapidsD:
   case CK_Emeraldrapids:
     // FIXME: Historically, we defined this legacy name, it would be nice to
     // remove it at some point. We've never exposed fine-grained names for
@@ -1436,9 +1440,13 @@ std::optional<unsigned> X86TargetInfo::getCPUCacheLineSize() const {
     case CK_Alderlake:
     case CK_Raptorlake:
     case CK_Meteorlake:
+    case CK_Arrowlake:
+    case CK_ArrowlakeS:
+    case CK_Lunarlake:
     case CK_Sierraforest:
     case CK_Grandridge:
     case CK_Graniterapids:
+    case CK_GraniterapidsD:
     case CK_Emeraldrapids:
     case CK_KNL:
     case CK_KNM:

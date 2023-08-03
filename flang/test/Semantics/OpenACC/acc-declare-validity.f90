@@ -30,6 +30,9 @@ module openacc_declare_validity
   !ERROR: DEVICEPTR clause is not allowed on the DECLARE directive in module declaration section
   !$acc declare deviceptr(ab)
 
+  !ERROR: The ZERO modifier is not allowed for the CREATE clause on the DECLARE directive
+  !$acc declare create(zero: aa)
+
 contains
 
   subroutine sub1(cc, dd)
@@ -53,5 +56,11 @@ contains
     !ERROR: Assumed-size dummy arrays may not appear on the DECLARE directive
     !$acc declare present(cc)
   end subroutine sub2
+
+  subroutine sub3()
+    real :: aa(100)
+    !ERROR: The ZERO modifier is not allowed for the COPYOUT clause on the DECLARE directive
+    !$acc declare copyout(zero: aa)
+  end subroutine
 
 end module openacc_declare_validity

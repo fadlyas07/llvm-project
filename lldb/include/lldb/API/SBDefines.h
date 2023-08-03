@@ -43,8 +43,10 @@
 namespace lldb {
 
 class LLDB_API SBAddress;
+class LLDB_API SBAttachInfo;
 class LLDB_API SBBlock;
 class LLDB_API SBBreakpoint;
+class LLDB_API SBBreakpointList;
 class LLDB_API SBBreakpointLocation;
 class LLDB_API SBBreakpointName;
 class LLDB_API SBBreakpointNameImpl;
@@ -84,10 +86,14 @@ class LLDB_API SBModule;
 class LLDB_API SBModuleSpec;
 class LLDB_API SBModuleSpecList;
 class LLDB_API SBPlatform;
+class LLDB_API SBPlatformConnectOptions;
+class LLDB_API SBPlatformShellCommand;
 class LLDB_API SBProcess;
 class LLDB_API SBProcessInfo;
 class LLDB_API SBQueue;
 class LLDB_API SBQueueItem;
+class LLDB_API SBReplayOptions;
+class LLDB_API SBReproducer;
 class LLDB_API SBScriptObject;
 class LLDB_API SBSection;
 class LLDB_API SBSourceManager;
