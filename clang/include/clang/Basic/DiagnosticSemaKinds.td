@@ -115,6 +115,9 @@ def ext_predef_outside_function : Warning<
 def ext_init_from_predefined : ExtWarn<
   "initializing an array from a '%0' predefined identifier is a Microsoft extension">,
   InGroup<MicrosoftInitFromPredefined>;
+def ext_string_literal_from_predefined : ExtWarn<
+  "expansion of predefined identifier '%0' to a string literal is a Microsoft extension">,
+  InGroup<MicrosoftStringLiteralFromPredefined>;
 def warn_float_overflow : Warning<
   "magnitude of floating-point constant too large for type %0; maximum is %1">,
    InGroup<LiteralRange>;
@@ -9883,6 +9886,11 @@ def err_break_not_in_loop_or_switch : Error<
 def warn_loop_ctrl_binds_to_inner : Warning<
   "'%0' is bound to current loop, GCC binds it to the enclosing loop">,
   InGroup<GccCompat>;
+def err_omp_bind_required_on_loop : Error<
+  "expected 'bind' clause for 'loop' construct without an enclosing OpenMP "
+  "construct">;
+def err_omp_loop_reduction_clause : Error<
+  "'reduction' clause not allowed with '#pragma omp loop bind(teams)'">;
 def warn_break_binds_to_switch : Warning<
   "'break' is bound to loop, GCC binds it to switch">,
   InGroup<GccCompat>;
