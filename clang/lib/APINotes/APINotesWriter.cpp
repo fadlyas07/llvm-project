@@ -30,10 +30,6 @@ class APINotesWriter::Implementation {
   /// Scratch space for bitstream writing.
   llvm::SmallVector<uint64_t, 64> Scratch;
 
-#if defined(__APPLE__) && defined(SWIFT_DOWNSTREAM)
-  bool SwiftImportAsMember = false;
-#endif
-
   /// Mapping from strings to identifier IDs.
   llvm::StringMap<IdentifierID> IdentifierIDs;
 
@@ -226,13 +222,6 @@ void APINotesWriter::Implementation::writeControlBlock(
 
   control_block::ModuleNameLayout ModuleName(Stream);
   ModuleName.emit(Scratch, this->ModuleName);
-
-#if defined(__APPLE__) && defined(SWIFT_DOWNSTREAM)
-  if (SwiftInferImportAsMember) {
-    control_block::ModuleOptionsLayout ModuleOptions(Stream);
-    ModuleOptions.emit(Scratch, SwiftInferImportAsMember);
-  }
-#endif
 
   if (SourceFile) {
     control_block::SourceFileLayout SourceFile(Stream);
@@ -902,7 +891,7 @@ unsigned getFunctionInfoSize(const FunctionInfo &FI) {
 }
 
 /// Emit a serialized representation of the function information.
-static void emitFunctionInfo(raw_ostream &OS, const FunctionInfo &FI) {
+void emitFunctionInfo(raw_ostream &OS, const FunctionInfo &FI) {
   emitCommonEntityInfo(OS, FI);
 
   uint8_t flags = 0;
