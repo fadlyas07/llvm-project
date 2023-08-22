@@ -159,6 +159,14 @@ Bug Fixes in This Version
 - Clang now reports missing-field-initializers warning for missing designated
   initializers in C++.
   (`#56628 <https://github.com/llvm/llvm-project/issues/56628>`_)
+- Clang now respects ``-fwrapv`` and ``-ftrapv`` for ``__builtin_abs`` and
+  ``abs`` builtins.
+  (`#45129 <https://github.com/llvm/llvm-project/issues/45129>`_,
+  `#45794 <https://github.com/llvm/llvm-project/issues/45794>`_)
+- Fixed an issue where accesses to the local variables of a coroutine during
+  ``await_suspend`` could be misoptimized, including accesses to the awaiter
+  object itself.
+  (`#56301 <https://github.com/llvm/llvm-project/issues/56301>`_)
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -294,6 +302,9 @@ Static Analyzer
 
 Sanitizers
 ----------
+
+- ``-fsanitize=signed-integer-overflow`` now instruments ``__builtin_abs`` and
+  ``abs`` builtins.
 
 Python Binding Changes
 ----------------------
