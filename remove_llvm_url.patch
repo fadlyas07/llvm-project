@@ -1,0 +1,53 @@
+From 4e214aea2fd2e49687a8ba341b3e573b725fb7b5 Mon Sep 17 00:00:00 2001
+From: fadlyas07 <mhmmdfdlyas@gmail.com>
+Date: Sun, 18 Jun 2023 08:33:57 +0000
+Subject: [PATCH] [Version] Simplify clang version
+
+---
+ clang/lib/Basic/Version.cpp | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/clang/lib/Basic/Version.cpp b/clang/lib/Basic/Version.cpp
+index e205da7adec1d8..563aabd954cc1a 100644
+--- a/clang/lib/Basic/Version.cpp
++++ b/clang/lib/Basic/Version.cpp
+@@ -23,10 +23,10 @@ namespace clang {
+ 
+ std::string getClangRepositoryPath() {
+ #if defined(CLANG_REPOSITORY_STRING)
+-  return CLANG_REPOSITORY_STRING;
++  return "";
+ #else
+ #ifdef CLANG_REPOSITORY
+-  return CLANG_REPOSITORY;
++  return "";
+ #else
+   return "";
+ #endif
+@@ -35,7 +35,7 @@ std::string getClangRepositoryPath() {
+ 
+ std::string getLLVMRepositoryPath() {
+ #ifdef LLVM_REPOSITORY
+-  return LLVM_REPOSITORY;
++  return "";
+ #else
+   return "";
+ #endif
+@@ -43,7 +43,7 @@ std::string getLLVMRepositoryPath() {
+ 
+ std::string getClangRevision() {
+ #ifdef CLANG_REVISION
+-  return CLANG_REVISION;
++  return "";
+ #else
+   return "";
+ #endif
+@@ -51,7 +51,7 @@ std::string getClangRevision() {
+ 
+ std::string getLLVMRevision() {
+ #ifdef LLVM_REVISION
+-  return LLVM_REVISION;
++  return "";
+ #else
+   return "";
+ #endif
