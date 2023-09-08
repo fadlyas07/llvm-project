@@ -216,6 +216,8 @@ Bug Fixes in This Version
   local structs.
 - Correctly parse non-ascii identifiers that appear immediately after a line splicing
   (`#65156 <https://github.com/llvm/llvm-project/issues/65156>`_`)
+- Clang no longer considers the loss of ``__unaligned`` qualifier from objects as
+  an invalid conversion during method function overload resolution.
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -267,11 +269,6 @@ Bug Fixes to C++ Support
 
 - Fix crash when parsing the requires clause of some generic lambdas.
   (`#64689 <https://github.com/llvm/llvm-project/issues/64689>`_)
-
-- Fix crash when the trailing return type of a generic and dependent
-  lambda refers to an init-capture.
-  (`#65067 <https://github.com/llvm/llvm-project/issues/65067>`_) and
-  (`#63675 <https://github.com/llvm/llvm-project/issues/63675>`_).
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -340,6 +337,12 @@ CUDA Support
 
 AIX Support
 ^^^^^^^^^^^
+
+- Introduced the ``-maix-small-local-exec-tls`` option to produce a faster
+  access sequence for local-exec TLS variables where the offset from the TLS
+  base is encoded as an immediate operand.
+  This access sequence is not used for TLS variables larger than 32KB, and is
+  currently only supported on 64-bit mode.
 
 WebAssembly Support
 ^^^^^^^^^^^^^^^^^^^
