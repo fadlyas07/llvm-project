@@ -2906,6 +2906,11 @@ def fvalidate_ast_input_files_content:
            " Files with mismatching mtime's are considered valid"
            " if both contents is identical">,
   MarshallingInfoFlag<HeaderSearchOpts<"ValidateASTInputFilesContent">>;
+def fforce_check_cxx20_modules_input_files:
+  Flag <["-"], "fforce-check-cxx20-modules-input-files">,
+  Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Check the input source files from C++20 modules explicitly">,
+  MarshallingInfoFlag<HeaderSearchOpts<"ForceCheckCXX20ModulesInputFiles">>;
 def fmodules_validate_input_files_content:
   Flag <["-"], "fmodules-validate-input-files-content">,
   Group<f_Group>, Flags<[NoXarchOption]>,
@@ -5750,6 +5755,8 @@ def mcx16 : Flag<["-"], "mcx16">, Group<m_x86_Features_Group>;
 def mno_cx16 : Flag<["-"], "mno-cx16">, Group<m_x86_Features_Group>;
 def menqcmd : Flag<["-"], "menqcmd">, Group<m_x86_Features_Group>;
 def mno_enqcmd : Flag<["-"], "mno-enqcmd">, Group<m_x86_Features_Group>;
+def mevex512 : Flag<["-"], "mevex512">, Group<m_x86_Features_Group>;
+def mno_evex512 : Flag<["-"], "mno-evex512">, Group<m_x86_Features_Group>;
 def mf16c : Flag<["-"], "mf16c">, Group<m_x86_Features_Group>;
 def mno_f16c : Flag<["-"], "mno-f16c">, Group<m_x86_Features_Group>;
 def mfma : Flag<["-"], "mfma">, Group<m_x86_Features_Group>;
