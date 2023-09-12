@@ -283,7 +283,7 @@ AArch64LegalizerInfo::AArch64LegalizerInfo(const AArch64Subtarget &ST)
       .scalarize(0)
       // Regardless of FP16 support, widen 16-bit elements to 32-bits.
       .minScalar(0, s32)
-      .libcallFor({s32, s64, v2s32, v4s32, v2s64});
+      .libcallFor({s32, s64});
 
   getActionDefinitionsBuilder(G_INSERT)
       .legalIf(all(typeInSet(0, {s32, s64, p0}),
@@ -1791,7 +1791,7 @@ bool AArch64LegalizerInfo::legalizeFCopySign(MachineInstr &MI,
   if (DstSize == 64)
     Mask = MIRBuilder.buildFNeg(VecTy, Mask);
 
-  auto Sel = MIRBuilder.buildInstr(AArch64::G_BIT, {VecTy}, {Ins1, Ins2, Mask});
+  auto Sel = MIRBuilder.buildInstr(AArch64::G_BSP, {VecTy}, {Mask, Ins1, Ins2});
 
   // Build an unmerge whose 0th elt is the original G_FCOPYSIGN destination. We
   // want this to eventually become an EXTRACT_SUBREG.
