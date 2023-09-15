@@ -9,19 +9,19 @@
 }>
 
 #Dense2D = #sparse_tensor.encoding<{
-  lvlTypes = [ "dense", "dense" ],
+  map = (d0, d1) -> (d0 : dense, d1 : dense),
   crdWidth = 64,
   posWidth = 32
 }>
 
 #Row = #sparse_tensor.encoding<{
-  lvlTypes = [ "compressed", "dense" ],
+  map = (d0, d1) -> (d0 : compressed, d1 : dense),
   crdWidth = 64,
   posWidth = 32
 }>
 
 #CSR = #sparse_tensor.encoding<{
-  lvlTypes = [ "dense", "compressed" ],
+  map = (d0, d1) -> (d0 : dense, d1 : compressed),
   crdWidth = 64,
   posWidth = 32
 }>
@@ -31,12 +31,11 @@
 }>
 
 #CSC = #sparse_tensor.encoding<{
-  lvlTypes = [ "dense", "compressed" ],
-  dimToLvl = affine_map<(i, j) -> (j, i)>
+  map = (d0, d1) -> (d1 : dense, d0 : compressed)
 }>
 
 #DCSR = #sparse_tensor.encoding<{
-  lvlTypes = [ "compressed", "compressed" ],
+  map = (d0, d1) -> (d0 : compressed, d1 : compressed),
   crdWidth = 64,
   posWidth = 32
 }>
