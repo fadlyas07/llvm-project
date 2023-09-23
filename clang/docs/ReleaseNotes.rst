@@ -51,6 +51,8 @@ C++ Specific Potentially Breaking Changes
   parameter lists or requires-clauses. This causes mangled names to change for
   function templates in the following cases:
 
+  - When a template parameter in a function template depends on a previous
+    template parameter, such as ``template<typename T, T V> void f()``.
   - When the function has any constraints, whether from constrained template
       parameters or requires-clauses.
   - When the template parameter list includes a deduced type -- either
@@ -334,6 +336,10 @@ Bug Fixes to C++ Support
 
 - Clang now no longer asserts when an UnresolvedLookupExpr is used as an
   expression requirement. (`#66612 https://github.com/llvm/llvm-project/issues/66612`)
+
+- Clang now disambiguates NTTP types when printing diagnostics where the
+  NTTP types are compared with the 'diff' method.
+  (`#66744 https://github.com/llvm/llvm-project/issues/66744`)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
