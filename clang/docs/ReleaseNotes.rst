@@ -145,6 +145,7 @@ C23 Feature Support
   previous placeholder value. Clang continues to accept ``-std=c2x`` and
   ``-std=gnu2x`` as aliases for C23 and GNU C23, respectively.
 - Clang now supports `requires c23` for module maps.
+- Clang now supports ``N3007 Type inference for object definitions``.
 
 Non-comprehensive list of changes in this release
 -------------------------------------------------
@@ -434,6 +435,9 @@ Bug Fixes to C++ Support
 - Fix crash caused by a spaceship operator returning a comparision category by
   reference. Fixes:
   (`#64162 <https://github.com/llvm/llvm-project/issues/64162>`_)
+- Fix a crash when calling a consteval function in an expression used as
+  the size of an array.
+  (`#65520 <https://github.com/llvm/llvm-project/issues/65520>`_)
 
 - Clang no longer tries to capture non-odr-used variables that appear
   in the enclosing expression of a lambda expression with a noexcept specifier.
