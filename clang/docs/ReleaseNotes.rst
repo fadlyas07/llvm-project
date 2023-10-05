@@ -146,6 +146,13 @@ Non-comprehensive list of changes in this release
 
 New Compiler Flags
 ------------------
+* ``-fverify-intermediate-code`` and its complement ``-fno-verify-intermediate-code``.
+  Enables or disables verification of the generated LLVM IR.
+  Users can pass this to turn on extra verification to catch certain types of
+  compiler bugs at the cost of extra compile time.
+  Since enabling the verifier adds a non-trivial cost of a few percent impact on
+  build times, it's disabled by default, unless your LLVM distribution itself is
+  compiled with runtime checks enabled.
 
 Deprecated Compiler Flags
 -------------------------
@@ -434,6 +441,11 @@ Bug Fixes to C++ Support
 - Fix crash where ill-formed code was being treated as a deduction guide and
   we now produce a diagnostic. Fixes:
   (`#65522 <https://github.com/llvm/llvm-project/issues/65522>`_)
+
+- Fixed a bug where clang incorrectly considered implicitly generated deduction
+  guides from a non-templated constructor and a templated constructor as ambiguous,
+  rather than prefer the non-templated constructor as specified in
+  [standard.group]p3.
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
