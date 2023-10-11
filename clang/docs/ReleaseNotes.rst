@@ -375,6 +375,12 @@ Bug Fixes in This Version
   Fixes (`#67690 <https://github.com/llvm/llvm-project/issues/67690>`_)
 - Fixes a ``clang-17`` regression where ``LLVM_UNREACHABLE_OPTIMIZE=OFF``
   cannot be used with ``Release`` mode builds. (`#68237 <https://github.com/llvm/llvm-project/issues/68237>`_).
+- Fix crash in evaluating ``constexpr`` value for invalid template function.
+  Fixes (`#68542 <https://github.com/llvm/llvm-project/issues/68542>`_)
+
+- Fixed an issue when a shift count larger than ``__INT64_MAX__``, in a right
+  shift operation, could result in missing warnings about
+  ``shift count >= width of type`` or internal compiler error.
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
