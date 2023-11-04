@@ -1142,66 +1142,54 @@ static ICmpInst::Predicate areGlobalsPotentiallyEqual(const GlobalValue *GV1,
 /// If we can determine that the two constants have a particular relation to
 /// each other, we should return the corresponding ICmp predicate, otherwise
 /// return ICmpInst::BAD_ICMP_PREDICATE.
-///
-/// To simplify this code we canonicalize the relation so that the first
-/// operand is always the most "complex" of the two.  We consider simple
-/// constants (like ConstantInt) to be the simplest, followed by
-/// GlobalValues, followed by ConstantExpr's (the most complex).
-///
-static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2,
-                                                bool isSigned) {
+static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2) {
   assert(V1->getType() == V2->getType() &&
          "Cannot compare different types of values!");
   if (V1 == V2) return ICmpInst::ICMP_EQ;
 
-  if (!isa<ConstantExpr>(V1) && !isa<GlobalValue>(V1) &&
-      !isa<BlockAddress>(V1)) {
-    if (!isa<GlobalValue>(V2) && !isa<ConstantExpr>(V2) &&
-        !isa<BlockAddress>(V2)) {
-      // We distilled this down to a simple case, use the standard constant
-      // folder.
-      ConstantInt *R = nullptr;
-      ICmpInst::Predicate pred = ICmpInst::ICMP_EQ;
-      R = dyn_cast<ConstantInt>(ConstantExpr::getICmp(pred, V1, V2));
-      if (R && !R->isZero())
-        return pred;
-      pred = isSigned ? ICmpInst::ICMP_SLT : ICmpInst::ICMP_ULT;
-      R = dyn_cast<ConstantInt>(ConstantExpr::getICmp(pred, V1, V2));
-      if (R && !R->isZero())
-        return pred;
-      pred = isSigned ? ICmpInst::ICMP_SGT : ICmpInst::ICMP_UGT;
-      R = dyn_cast<ConstantInt>(ConstantExpr::getICmp(pred, V1, V2));
-      if (R && !R->isZero())
-        return pred;
+  // The following folds only apply to pointers.
+  if (!V1->getType()->isPointerTy())
+    return ICmpInst::BAD_ICMP_PREDICATE;
 
-      // If we couldn't figure it out, bail.
-      return ICmpInst::BAD_ICMP_PREDICATE;
-    }
-
-    // If the first operand is simple, swap operands.
-    ICmpInst::Predicate SwappedRelation =
-      evaluateICmpRelation(V2, V1, isSigned);
+  // To simplify this code we canonicalize the relation so that the first
+  // operand is always the most "complex" of the two.  We consider simple
+  // constants (like ConstantPointerNull) to be the simplest, followed by
+  // BlockAddress, GlobalValues, and ConstantExpr's (the most complex).
+  auto GetComplexity = [](Constant *V) {
+    if (isa<ConstantExpr>(V))
+      return 3;
+    if (isa<GlobalValue>(V))
+      return 2;
+    if (isa<BlockAddress>(V))
+      return 1;
+    return 0;
+  };
+  if (GetComplexity(V1) < GetComplexity(V2)) {
+    ICmpInst::Predicate SwappedRelation = evaluateICmpRelation(V2, V1);
     if (SwappedRelation != ICmpInst::BAD_ICMP_PREDICATE)
       return ICmpInst::getSwappedPredicate(SwappedRelation);
+    return ICmpInst::BAD_ICMP_PREDICATE;
+  }
 
-  } else if (const GlobalValue *GV = dyn_cast<GlobalValue>(V1)) {
-    if (isa<ConstantExpr>(V2)) {  // Swap as necessary.
-      ICmpInst::Predicate SwappedRelation =
-        evaluateICmpRelation(V2, V1, isSigned);
-      if (SwappedRelation != ICmpInst::BAD_ICMP_PREDICATE)
-        return ICmpInst::getSwappedPredicate(SwappedRelation);
-      return ICmpInst::BAD_ICMP_PREDICATE;
+  if (const BlockAddress *BA = dyn_cast<BlockAddress>(V1)) {
+    // Now we know that the RHS is a BlockAddress or simple constant.
+    if (const BlockAddress *BA2 = dyn_cast<BlockAddress>(V2)) {
+      // Block address in another function can't equal this one, but block
+      // addresses in the current function might be the same if blocks are
+      // empty.
+      if (BA2->getFunction() != BA->getFunction())
+        return ICmpInst::ICMP_NE;
+    } else if (isa<ConstantPointerNull>(V2)) {
+      return ICmpInst::ICMP_NE;
     }
-
+  } else if (const GlobalValue *GV = dyn_cast<GlobalValue>(V1)) {
     // Now we know that the RHS is a GlobalValue, BlockAddress or simple
-    // constant (which, since the types must match, means that it's a
-    // ConstantPointerNull).
+    // constant.
     if (const GlobalValue *GV2 = dyn_cast<GlobalValue>(V2)) {
       return areGlobalsPotentiallyEqual(GV, GV2);
     } else if (isa<BlockAddress>(V2)) {
       return ICmpInst::ICMP_NE; // Globals never equal labels.
-    } else {
-      assert(isa<ConstantPointerNull>(V2) && "Canonicalization guarantee!");
+    } else if (isa<ConstantPointerNull>(V2)) {
       // GlobalVals can never be null unless they have external weak linkage.
       // We don't try to evaluate aliases here.
       // NOTE: We should not be doing this constant folding if null pointer
@@ -1211,30 +1199,6 @@ static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2,
           !NullPointerIsDefined(nullptr /* F */,
                                 GV->getType()->getAddressSpace()))
         return ICmpInst::ICMP_UGT;
-    }
-  } else if (const BlockAddress *BA = dyn_cast<BlockAddress>(V1)) {
-    if (isa<ConstantExpr>(V2)) {  // Swap as necessary.
-      ICmpInst::Predicate SwappedRelation =
-        evaluateICmpRelation(V2, V1, isSigned);
-      if (SwappedRelation != ICmpInst::BAD_ICMP_PREDICATE)
-        return ICmpInst::getSwappedPredicate(SwappedRelation);
-      return ICmpInst::BAD_ICMP_PREDICATE;
-    }
-
-    // Now we know that the RHS is a GlobalValue, BlockAddress or simple
-    // constant (which, since the types must match, means that it is a
-    // ConstantPointerNull).
-    if (const BlockAddress *BA2 = dyn_cast<BlockAddress>(V2)) {
-      // Block address in another function can't equal this one, but block
-      // addresses in the current function might be the same if blocks are
-      // empty.
-      if (BA2->getFunction() != BA->getFunction())
-        return ICmpInst::ICMP_NE;
-    } else {
-      // Block addresses aren't null, don't equal the address of globals.
-      assert((isa<ConstantPointerNull>(V2) || isa<GlobalValue>(V2)) &&
-             "Canonicalization guarantee!");
-      return ICmpInst::ICMP_NE;
     }
   } else {
     // Ok, the LHS is known to be a constantexpr.  The RHS can be any of a
@@ -1288,25 +1252,6 @@ static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2,
   return ICmpInst::BAD_ICMP_PREDICATE;
 }
 
-static Constant *constantFoldCompareGlobalToNull(CmpInst::Predicate Predicate,
-                                                 Constant *C1, Constant *C2) {
-  const GlobalValue *GV = dyn_cast<GlobalValue>(C2);
-  if (!GV || !C1->isNullValue())
-    return nullptr;
-
-  // Don't try to evaluate aliases.  External weak GV can be null.
-  if (!isa<GlobalAlias>(GV) && !GV->hasExternalWeakLinkage() &&
-      !NullPointerIsDefined(nullptr /* F */,
-                            GV->getType()->getAddressSpace())) {
-    if (Predicate == ICmpInst::ICMP_EQ)
-      return ConstantInt::getFalse(C1->getContext());
-    else if (Predicate == ICmpInst::ICMP_NE)
-      return ConstantInt::getTrue(C1->getContext());
-  }
-
-  return nullptr;
-}
-
 Constant *llvm::ConstantFoldCompareInstruction(CmpInst::Predicate Predicate,
                                                Constant *C1, Constant *C2) {
   Type *ResultTy;
@@ -1344,14 +1289,6 @@ Constant *llvm::ConstantFoldCompareInstruction(CmpInst::Predicate Predicate,
     // and ordered comparison fails.
     return ConstantInt::get(ResultTy, CmpInst::isUnordered(Predicate));
   }
-
-  // icmp eq/ne(null,GV) -> false/true
-  if (Constant *Folded = constantFoldCompareGlobalToNull(Predicate, C1, C2))
-    return Folded;
-
-  // icmp eq/ne(GV,null) -> false/true
-  if (Constant *Folded = constantFoldCompareGlobalToNull(Predicate, C2, C1))
-    return Folded;
 
   if (C2->isNullValue()) {
     // The caller is expected to commute the operands if the constant expression
@@ -1429,7 +1366,7 @@ Constant *llvm::ConstantFoldCompareInstruction(CmpInst::Predicate Predicate,
   } else {
     // Evaluate the relation between the two constants, per the predicate.
     int Result = -1;  // -1 = unknown, 0 = known false, 1 = known true.
-    switch (evaluateICmpRelation(C1, C2, CmpInst::isSigned(Predicate))) {
+    switch (evaluateICmpRelation(C1, C2)) {
     default: llvm_unreachable("Unknown relational!");
     case ICmpInst::BAD_ICMP_PREDICATE:
       break;  // Couldn't determine anything about these constants.
@@ -1513,20 +1450,6 @@ Constant *llvm::ConstantFoldCompareInstruction(CmpInst::Predicate Predicate,
     // If we evaluated the result, return it now.
     if (Result != -1)
       return ConstantInt::get(ResultTy, Result);
-
-    // If the right hand side is a bitcast, try using its inverse to simplify
-    // it by moving it to the left hand side.  We can't do this if it would turn
-    // a vector compare into a scalar compare or visa versa, or if it would turn
-    // the operands into FP values.
-    if (ConstantExpr *CE2 = dyn_cast<ConstantExpr>(C2)) {
-      Constant *CE2Op0 = CE2->getOperand(0);
-      if (CE2->getOpcode() == Instruction::BitCast &&
-          CE2->getType()->isVectorTy() == CE2Op0->getType()->isVectorTy() &&
-          !CE2Op0->getType()->isFPOrFPVectorTy()) {
-        Constant *Inverse = ConstantExpr::getBitCast(C1, CE2Op0->getType());
-        return ConstantExpr::getICmp(Predicate, Inverse, CE2Op0);
-      }
-    }
 
     if ((!isa<ConstantExpr>(C1) && isa<ConstantExpr>(C2)) ||
         (C1->isNullValue() && !C2->isNullValue())) {
@@ -1693,39 +1616,6 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
                ? ConstantVector::getSplat(
                      cast<VectorType>(GEPTy)->getElementCount(), C)
                : C;
-
-  if (C->isNullValue()) {
-    bool isNull = true;
-    for (Value *Idx : Idxs)
-      if (!isa<UndefValue>(Idx) && !cast<Constant>(Idx)->isNullValue()) {
-        isNull = false;
-        break;
-      }
-    if (isNull) {
-      PointerType *PtrTy = cast<PointerType>(C->getType()->getScalarType());
-      Type *Ty = GetElementPtrInst::getIndexedType(PointeeTy, Idxs);
-
-      assert(Ty && "Invalid indices for GEP!");
-      Type *OrigGEPTy = PointerType::get(Ty, PtrTy->getAddressSpace());
-      Type *GEPTy = PointerType::get(Ty, PtrTy->getAddressSpace());
-      if (VectorType *VT = dyn_cast<VectorType>(C->getType()))
-        GEPTy = VectorType::get(OrigGEPTy, VT->getElementCount());
-
-      // The GEP returns a vector of pointers when one of more of
-      // its arguments is a vector.
-      for (Value *Idx : Idxs) {
-        if (auto *VT = dyn_cast<VectorType>(Idx->getType())) {
-          assert((!isa<VectorType>(GEPTy) || isa<ScalableVectorType>(GEPTy) ==
-                                                 isa<ScalableVectorType>(VT)) &&
-                 "Mismatched GEPTy vector types");
-          GEPTy = VectorType::get(OrigGEPTy, VT->getElementCount());
-          break;
-        }
-      }
-
-      return Constant::getNullValue(GEPTy);
-    }
-  }
 
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(C))
     if (auto *GEP = dyn_cast<GEPOperator>(CE))
