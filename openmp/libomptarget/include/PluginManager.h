@@ -93,9 +93,6 @@ private:
 
 /// Struct for the data required to handle plugins
 struct PluginManager {
-  PluginManager(bool UseEventsForAtomicTransfers)
-      : UseEventsForAtomicTransfers(UseEventsForAtomicTransfers) {}
-
   /// RTLs identified on the host
   PluginAdaptorManagerTy RTLs;
 
@@ -121,10 +118,6 @@ struct PluginManager {
   kmp_target_offload_kind_t TargetOffloadPolicy = tgt_default;
   std::mutex TargetOffloadMtx; ///< For TargetOffloadPolicy
 
-  /// Flag to indicate if we use events to ensure the atomicity of
-  /// map clauses or not. Can be modified with an environment variable.
-  const bool UseEventsForAtomicTransfers;
-
   // Work around for plugins that call dlopen on shared libraries that call
   // tgt_register_lib during their initialisation. Stash the pointers in a
   // vector until the plugins are all initialised and then register them.
@@ -141,6 +134,11 @@ struct PluginManager {
     for (auto *Desc : DelayedBinDesc)
       __tgt_register_lib(Desc);
     DelayedBinDesc.clear();
+  }
+
+  int getNumDevices() {
+    std::lock_guard<decltype(RTLsMtx)> Lock(RTLsMtx);
+    return Devices.size();
   }
 
 private:
