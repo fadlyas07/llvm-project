@@ -2753,17 +2753,19 @@ AArch64TargetLowering::EmitFill(MachineInstr &MI, MachineBasicBlock *BB) const {
   return BB;
 }
 
-MachineBasicBlock *AArch64TargetLowering::EmitZTSpillFill(MachineInstr &MI,
-                                                          MachineBasicBlock *BB,
-                                                          bool IsSpill) const {
+MachineBasicBlock *AArch64TargetLowering::EmitZTInstr(MachineInstr &MI,
+                                                      MachineBasicBlock *BB,
+                                                      unsigned Opcode,
+                                                      bool Op0IsDef) const {
   const TargetInstrInfo *TII = Subtarget->getInstrInfo();
   MachineInstrBuilder MIB;
-  unsigned Opc = IsSpill ? AArch64::STR_TX : AArch64::LDR_TX;
-  auto Rs = IsSpill ? RegState::Kill : RegState::Define;
-  MIB = BuildMI(*BB, MI, MI.getDebugLoc(), TII->get(Opc));
-  MIB.addReg(MI.getOperand(0).getReg(), Rs);
-  MIB.add(MI.getOperand(1)); // Base
-  MI.eraseFromParent();      // The pseudo is gone now.
+
+  MIB = BuildMI(*BB, MI, MI.getDebugLoc(), TII->get(Opcode))
+            .addReg(MI.getOperand(0).getReg(), Op0IsDef ? RegState::Define : 0);
+  for (unsigned I = 1; I < MI.getNumOperands(); ++I)
+    MIB.add(MI.getOperand(I));
+
+  MI.eraseFromParent(); // The pseudo is gone now.
   return BB;
 }
 
@@ -2884,11 +2886,13 @@ MachineBasicBlock *AArch64TargetLowering::EmitInstrWithCustomInserter(
   case AArch64::LDR_ZA_PSEUDO:
     return EmitFill(MI, BB);
   case AArch64::LDR_TX_PSEUDO:
-    return EmitZTSpillFill(MI, BB, /*IsSpill=*/false);
+    return EmitZTInstr(MI, BB, AArch64::LDR_TX, /*Op0IsDef=*/true);
   case AArch64::STR_TX_PSEUDO:
-    return EmitZTSpillFill(MI, BB, /*IsSpill=*/true);
+    return EmitZTInstr(MI, BB, AArch64::STR_TX, /*Op0IsDef=*/false);
   case AArch64::ZERO_M_PSEUDO:
     return EmitZero(MI, BB);
+  case AArch64::ZERO_T_PSEUDO:
+    return EmitZTInstr(MI, BB, AArch64::ZERO_T, /*Op0IsDef=*/true);
   }
 }
 
@@ -7392,6 +7396,22 @@ static bool checkZExtBool(SDValue Arg, const SelectionDAG &DAG) {
   KnownBits Bits = DAG.computeKnownBits(Arg, 4);
   bool ZExtBool = (Bits.Zero & RequredZero) == RequredZero;
   return ZExtBool;
+}
+
+void AArch64TargetLowering::AdjustInstrPostInstrSelection(MachineInstr &MI,
+                                                          SDNode *Node) const {
+  // Live-in physreg copies that are glued to SMSTART are applied as
+  // implicit-def's in the InstrEmitter. Here we remove them, allowing the
+  // register allocator to pass call args in callee saved regs, without extra
+  // copies to avoid these fake clobbers of actually-preserved GPRs.
+  if (MI.getOpcode() == AArch64::MSRpstatesvcrImm1 ||
+      MI.getOpcode() == AArch64::MSRpstatePseudo)
+    for (unsigned I = MI.getNumOperands() - 1; I > 0; --I)
+      if (MachineOperand &MO = MI.getOperand(I);
+          MO.isReg() && MO.isImplicit() && MO.isDef() &&
+          (AArch64::GPR32RegClass.contains(MO.getReg()) ||
+           AArch64::GPR64RegClass.contains(MO.getReg())))
+        MI.removeOperand(I);
 }
 
 SDValue AArch64TargetLowering::changeStreamingMode(
