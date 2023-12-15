@@ -316,6 +316,9 @@ bool ByteCodeExprGen<Emitter>::VisitBinaryOperator(const BinaryOperator *BO) {
   if (BO->isLogicalOp())
     return this->VisitLogicalBinOp(BO);
 
+  if (BO->getType()->isAnyComplexType())
+    return this->VisitComplexBinOp(BO);
+
   const Expr *LHS = BO->getLHS();
   const Expr *RHS = BO->getRHS();
 
@@ -555,6 +558,107 @@ bool ByteCodeExprGen<Emitter>::VisitLogicalBinOp(const BinaryOperator *E) {
   assert(T);
   if (T != PT_Bool)
     return this->emitCast(PT_Bool, *T, E);
+  return true;
+}
+
+template <class Emitter>
+bool ByteCodeExprGen<Emitter>::VisitComplexBinOp(const BinaryOperator *E) {
+  // FIXME: We expect a pointer on the stack here.
+  //   we should not do that, but that's part of a bigger rework.
+  const Expr *LHS = E->getLHS();
+  const Expr *RHS = E->getRHS();
+  PrimType LHSElemT = *this->classifyComplexElementType(LHS->getType());
+  PrimType RHSElemT = *this->classifyComplexElementType(RHS->getType());
+
+  unsigned LHSOffset = this->allocateLocalPrimitive(LHS, PT_Ptr, true, false);
+  unsigned RHSOffset = this->allocateLocalPrimitive(RHS, PT_Ptr, true, false);
+  unsigned ResultOffset = ~0u;
+  if (!this->DiscardResult)
+    ResultOffset = this->allocateLocalPrimitive(E, PT_Ptr, true, false);
+
+  assert(LHSElemT == RHSElemT);
+
+  // Save result pointer in ResultOffset
+  if (!this->DiscardResult) {
+    if (!this->emitDupPtr(E))
+      return false;
+    if (!this->emitSetLocal(PT_Ptr, ResultOffset, E))
+      return false;
+  }
+
+  // Evaluate LHS and save value to LHSOffset.
+  if (!this->visit(LHS))
+    return false;
+  if (!this->emitSetLocal(PT_Ptr, LHSOffset, E))
+    return false;
+
+  // Same with RHS.
+  if (!this->visit(RHS))
+    return false;
+  if (!this->emitSetLocal(PT_Ptr, RHSOffset, E))
+    return false;
+
+  // Now we can get pointers to the LHS and RHS from the offsets above.
+  BinaryOperatorKind Op = E->getOpcode();
+  for (unsigned ElemIndex = 0; ElemIndex != 2; ++ElemIndex) {
+    // Result pointer for the store later.
+    if (!this->DiscardResult) {
+      if (!this->emitGetLocal(PT_Ptr, ResultOffset, E))
+        return false;
+    }
+
+    if (!this->emitGetLocal(PT_Ptr, LHSOffset, E))
+      return false;
+    if (!this->emitConstUint8(ElemIndex, E))
+      return false;
+    if (!this->emitArrayElemPtrPopUint8(E))
+      return false;
+    if (!this->emitLoadPop(LHSElemT, E))
+      return false;
+
+    if (!this->emitGetLocal(PT_Ptr, RHSOffset, E))
+      return false;
+    if (!this->emitConstUint8(ElemIndex, E))
+      return false;
+    if (!this->emitArrayElemPtrPopUint8(E))
+      return false;
+    if (!this->emitLoadPop(RHSElemT, E))
+      return false;
+
+    // The actual operation.
+    switch (Op) {
+    case BO_Add:
+      if (LHSElemT == PT_Float) {
+        if (!this->emitAddf(getRoundingMode(E), E))
+          return false;
+      } else {
+        if (!this->emitAdd(LHSElemT, E))
+          return false;
+      }
+      break;
+    case BO_Sub:
+      if (LHSElemT == PT_Float) {
+        if (!this->emitSubf(getRoundingMode(E), E))
+          return false;
+      } else {
+        if (!this->emitSub(LHSElemT, E))
+          return false;
+      }
+      break;
+
+    default:
+      return false;
+    }
+
+    if (!this->DiscardResult) {
+      // Initialize array element with the value we just computed.
+      if (!this->emitInitElemPop(LHSElemT, ElemIndex, E))
+        return false;
+    } else {
+      if (!this->emitPop(LHSElemT, E))
+        return false;
+    }
+  }
   return true;
 }
 
@@ -2180,15 +2284,33 @@ const Function *ByteCodeExprGen<Emitter>::getFunction(const FunctionDecl *FD) {
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::visitExpr(const Expr *E) {
   ExprScope<Emitter> RootScope(this);
-  if (!visit(E))
-    return false;
-
-  if (E->getType()->isVoidType())
+  // Void expressions.
+  if (E->getType()->isVoidType()) {
+    if (!visit(E))
+      return false;
     return this->emitRetVoid(E);
+  }
 
-  if (std::optional<PrimType> T = classify(E))
+  // Expressions with a primitive return type.
+  if (std::optional<PrimType> T = classify(E)) {
+    if (!visit(E))
+      return false;
     return this->emitRet(*T, E);
-  return this->emitRetValue(E);
+  }
+
+  // Expressions with a composite return type.
+  // For us, that means everything we don't
+  // have a PrimType for.
+  if (std::optional<unsigned> LocalOffset = this->allocateLocal(E)) {
+    if (!this->visitLocalInitializer(E, *LocalOffset))
+      return false;
+
+    if (!this->emitGetPtrLocal(*LocalOffset, E))
+      return false;
+    return this->emitRetValue(E);
+  }
+
+  return false;
 }
 
 /// Toplevel visitDecl().
@@ -2644,7 +2766,14 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
       return false;
     if (!this->emitConstUint8(0, E))
       return false;
-    return this->emitArrayElemPtrPopUint8(E);
+    if (!this->emitArrayElemPtrPopUint8(E))
+      return false;
+
+    // Since our _Complex implementation does not map to a primitive type,
+    // we sometimes have to do the lvalue-to-rvalue conversion here manually.
+    if (!SubExpr->isLValue())
+      return this->emitLoadPop(classifyPrim(E->getType()), E);
+    return true;
   }
   case UO_Imag: { // __imag x
     assert(!T);
@@ -2652,7 +2781,14 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
       return false;
     if (!this->emitConstUint8(1, E))
       return false;
-    return this->emitArrayElemPtrPopUint8(E);
+    if (!this->emitArrayElemPtrPopUint8(E))
+      return false;
+
+    // Since our _Complex implementation does not map to a primitive type,
+    // we sometimes have to do the lvalue-to-rvalue conversion here manually.
+    if (!SubExpr->isLValue())
+      return this->emitLoadPop(classifyPrim(E->getType()), E);
+    return true;
   }
   case UO_Extension:
     return this->delegate(SubExpr);
