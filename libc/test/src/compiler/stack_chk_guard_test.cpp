@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-libc-macros/signal-macros.h"
+#include "src/__support/macros/sanitizer.h"
 #include "src/compiler/__stack_chk_fail.h"
 #include "src/string/memset.h"
 #include "test/UnitTest/Test.h"
@@ -15,6 +16,9 @@ TEST(LlvmLibcStackChkFail, Death) {
   EXPECT_DEATH([] { __stack_chk_fail(); }, WITH_SIGNAL(SIGABRT));
 }
 
+// Disable the test when asan is enabled so that it doesn't immediately fail
+// after the memset, but before the stack canary is re-checked.
+#ifndef LIBC_HAVE_ADDRESS_SANITIZER
 TEST(LlvmLibcStackChkFail, Smash) {
   EXPECT_DEATH(
       [] {
@@ -23,3 +27,4 @@ TEST(LlvmLibcStackChkFail, Smash) {
       },
       WITH_SIGNAL(SIGABRT));
 }
+#endif // LIBC_HAVE_ADDRESS_SANITIZER
