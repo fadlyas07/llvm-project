@@ -31,9 +31,9 @@ class T_MAP4 { Map OpMap = T_MAP4; }
 class T_MAP5 { Map OpMap = T_MAP5; }
 class T_MAP6 { Map OpMap = T_MAP6; }
 class T_MAP7 { Map OpMap = T_MAP7; }
-class XOP8   { Map OpMap = XOP8; Prefix OpPrefix = PS; }
-class XOP9   { Map OpMap = XOP9; Prefix OpPrefix = PS; }
-class XOPA   { Map OpMap = XOPA; Prefix OpPrefix = PS; }
+class XOP8   { Map OpMap = XOP8; }
+class XOP9   { Map OpMap = XOP9; }
+class XOPA   { Map OpMap = XOPA; }
 class ThreeDNow { Map OpMap = ThreeDNow; }
 class PS { Prefix OpPrefix = PS; }
 class PD { Prefix OpPrefix = PD; }
@@ -79,7 +79,7 @@ class AVX512XDIi8Base : TB, XD {
   Domain ExeDomain = SSEPackedInt;
   ImmType ImmT = Imm8;
 }
-class AVX512PSIi8Base : TB, PS {
+class AVX512PSIi8Base : TB {
   Domain ExeDomain = SSEPackedSingle;
   ImmType ImmT = Imm8;
 }
@@ -99,17 +99,6 @@ class DisassembleOnly {
   bit ForceDisassemble = 1;
 }
 
-
-// SchedModel info for instruction that loads one value and gets the second
-// (and possibly third) value from a register.
-// This is used for instructions that put the memory operands before other
-// uses.
-class SchedLoadReg<X86FoldableSchedWrite Sched> : Sched<[Sched.Folded,
-  // Memory operand.
-  ReadDefault, ReadDefault, ReadDefault, ReadDefault, ReadDefault,
-  // Register reads (implicit or explicit).
-  Sched.ReadAfterFold, Sched.ReadAfterFold]>;
-
 //===----------------------------------------------------------------------===//
 // X86 Type infomation definitions
 //===----------------------------------------------------------------------===//
@@ -122,8 +111,7 @@ class X86TypeInfo<ValueType vt, string instrsuffix, RegisterClass regclass,
                   Operand immoperand, SDPatternOperator immoperator,
                   SDPatternOperator immnosuoperator, Operand imm8operand,
                   SDPatternOperator imm8operator, SDPatternOperator imm8nosuoperator,
-                  bit hasEvenOpcode, OperandSize opSize,
-                  bit hasREX_W> {
+                  bit hasEvenOpcode, bit hasREX_W> {
   /// VT - This is the value type itself.
   ValueType VT = vt;
 
@@ -177,11 +165,6 @@ class X86TypeInfo<ValueType vt, string instrsuffix, RegisterClass regclass,
   /// other datatypes are usually odd.
   bit HasEvenOpcode = hasEvenOpcode;
 
-  /// OpSize - Selects whether the instruction needs a 0x66 prefix based on
-  /// 16-bit vs 32-bit mode. i8/i64 set this to OpSizeFixed. i16 sets this
-  /// to Opsize16. i32 sets this to OpSize32.
-  OperandSize OpSize = opSize;
-
   /// HasREX_W - This bit is set to true if the instruction should have
   /// the 0x40 REX prefix.  This is set for i64 types.
   bit HasREX_W = hasREX_W;
@@ -191,16 +174,16 @@ def invalid_node : SDNode<"<<invalid_node>>", SDTIntLeaf,[],"<<invalid_node>>">;
 
 def Xi8  : X86TypeInfo<i8, "b", GR8, loadi8, i8mem, Imm8, i8imm,
                        imm_su, imm, i8imm, invalid_node, invalid_node,
-                       1, OpSizeFixed, 0>;
+                       1, 0>;
 def Xi16 : X86TypeInfo<i16, "w", GR16, loadi16, i16mem, Imm16, i16imm,
                        imm_su, imm, i16i8imm, i16immSExt8_su, i16immSExt8,
-                       0, OpSize16, 0>;
+                       0, 0>;
 def Xi32 : X86TypeInfo<i32, "l", GR32, loadi32, i32mem, Imm32, i32imm,
                        imm_su, imm, i32i8imm, i32immSExt8_su, i32immSExt8,
-                       0, OpSize32, 0>;
+                       0, 0>;
 def Xi64 : X86TypeInfo<i64, "q", GR64, loadi64, i64mem, Imm32S, i64i32imm,
-                      i64immSExt32_su, i64immSExt32, i64i8imm, i64immSExt8_su,
-                      i64immSExt8, 0, OpSizeFixed, 1>;
+                       i64immSExt32_su, i64immSExt32, i64i8imm, i64immSExt8_su,
+                       i64immSExt8, 0, 1>;
 
 // Group template arguments that can be derived from the vector type (EltNum x
 // EltVT).  These are things like the register class for the writemask, etc.
@@ -574,11 +557,11 @@ class SSIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
       : Ii8<o, F, outs, ins, asm, pattern>, TB, XS, Requires<[UseSSE1]>;
 class PSI<bits<8> o, Format F, dag outs, dag ins, string asm,
           list<dag> pattern>
-      : I<o, F, outs, ins, asm, pattern, SSEPackedSingle>, TB, PS,
+      : I<o, F, outs, ins, asm, pattern, SSEPackedSingle>, TB,
         Requires<[UseSSE1]>;
 class PSIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
             list<dag> pattern>
-      : Ii8<o, F, outs, ins, asm, pattern, SSEPackedSingle>, TB, PS,
+      : Ii8<o, F, outs, ins, asm, pattern, SSEPackedSingle>, TB,
         Requires<[UseSSE1]>;
 class VSSI<bits<8> o, Format F, dag outs, dag ins, string asm,
            list<dag> pattern>
@@ -587,7 +570,7 @@ class VSSI<bits<8> o, Format F, dag outs, dag ins, string asm,
 class VPSI<bits<8> o, Format F, dag outs, dag ins, string asm,
            list<dag> pattern>
       : I<o, F, outs, ins, !strconcat("v", asm), pattern, SSEPackedSingle>,
-        TB, PS, Requires<[HasAVX]>;
+        TB, Requires<[HasAVX]>;
 
 // SSE2 Instruction Templates:
 //
@@ -694,11 +677,11 @@ class SS3AI<bits<8> o, Format F, dag outs, dag ins, string asm,
         Requires<[UseSSSE3]>;
 class MMXSS38I<bits<8> o, Format F, dag outs, dag ins, string asm,
                list<dag> pattern>
-      : I<o, F, outs, ins, asm, pattern, SSEPackedInt>, T8, PS,
+      : I<o, F, outs, ins, asm, pattern, SSEPackedInt>, T8,
         Requires<[HasMMX, HasSSSE3]>;
 class MMXSS3AI<bits<8> o, Format F, dag outs, dag ins, string asm,
                list<dag> pattern>
-      : Ii8<o, F, outs, ins, asm, pattern, SSEPackedInt>, TA, PS,
+      : Ii8<o, F, outs, ins, asm, pattern, SSEPackedInt>, TA,
         Requires<[HasMMX, HasSSSE3]>;
 
 // SSE4.1 Instruction Templates:
@@ -824,7 +807,7 @@ class AVX512PDI<bits<8> o, Format F, dag outs, dag ins, string asm,
         Requires<[HasAVX512]>;
 class AVX512PSI<bits<8> o, Format F, dag outs, dag ins, string asm,
            list<dag> pattern>
-      : I<o, F, outs, ins, asm, pattern, SSEPackedSingle>, TB, PS,
+      : I<o, F, outs, ins, asm, pattern, SSEPackedSingle>, TB,
         Requires<[HasAVX512]>;
 class AVX512PIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
               list<dag> pattern, Domain d>
@@ -947,32 +930,31 @@ class VRS2I<bits<8> o, Format F, dag outs, dag ins, string asm,
 // MMXIi8 - MMX instructions with ImmT == Imm8 and PS prefix.
 class MMXI<bits<8> o, Format F, dag outs, dag ins, string asm,
            list<dag> pattern>
-      : I<o, F, outs, ins, asm, pattern>, TB, PS, Requires<[HasMMX]>;
+      : I<o, F, outs, ins, asm, pattern>, TB, Requires<[HasMMX]>;
 class MMXRI<bits<8> o, Format F, dag outs, dag ins, string asm,
             list<dag> pattern>
-      : I<o, F, outs, ins, asm, pattern>, TB, PS, REX_W,
+      : I<o, F, outs, ins, asm, pattern>, TB, REX_W,
         Requires<[HasMMX,In64BitMode]>;
 class MMXIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
              list<dag> pattern>
-      : Ii8<o, F, outs, ins, asm, pattern>, TB, PS, Requires<[HasMMX]>;
+      : Ii8<o, F, outs, ins, asm, pattern>, TB, Requires<[HasMMX]>;
 
 /// ITy - This instruction base class takes the type info for the instruction.
 /// Using this, it:
 /// 1. Concatenates together the instruction mnemonic with the appropriate
 ///    suffix letter, a tab, and the arguments.
-/// 2. Infers whether the instruction should have a 0x66 prefix byte.
-/// 3. Infers whether the instruction should have a 0x40 REX_W prefix.
-/// 4. Infers whether the low bit of the opcode should be 0 (for i8 operations)
+/// 2. Infers whether the instruction should have a 0x40 REX_W prefix.
+/// 3. Infers whether the low bit of the opcode should be 0 (for i8 operations)
 ///    or 1 (for i16,i32,i64 operations).
-class ITy<bits<8> opcode, Format f, X86TypeInfo typeinfo, dag outs, dag ins,
-          string mnemonic, string args, list<dag> pattern>
-  : I<{opcode{7}, opcode{6}, opcode{5}, opcode{4},
-       opcode{3}, opcode{2}, opcode{1},
-       !if(!eq(typeinfo.HasEvenOpcode, 1), 0, opcode{0})}, f, outs, ins,
-      !strconcat(mnemonic, "{", typeinfo.InstrSuffix, "}\t", args), pattern> {
-
+class ITy<bits<8> o, Format f, X86TypeInfo t, dag outs, dag ins, string m,
+          string args, list<dag> p>
+  : I<{o{7}, o{6}, o{5}, o{4}, o{3}, o{2}, o{1},
+       !if(!eq(t.HasEvenOpcode, 1), 0, o{0})}, f, outs, ins,
+      !strconcat(m, "{", t.InstrSuffix, "}\t", args), p> {
   let hasSideEffects = 0;
-  // Infer instruction prefixes from type info.
-  let OpSize = typeinfo.OpSize;
-  let hasREX_W  = typeinfo.HasREX_W;
+  let hasREX_W  = t.HasREX_W;
 }
+
+defvar unaryop_args = "$src";
+defvar binop_args = "{$src2, $src1|$src1, $src2}";
+defvar binop_ndd_args = "{$src2, $src1, $dst|$dst, $src1, $src2}";
