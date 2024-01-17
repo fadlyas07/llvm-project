@@ -281,6 +281,8 @@ Non-comprehensive list of changes in this release
 
 * Added ``#pragma clang fp reciprocal``.
 
+* The version of Unicode used by Clang (primarily to parse identifiers) has been updated to 15.1.
+
 New Compiler Flags
 ------------------
 
@@ -568,6 +570,7 @@ Improvements to Clang's diagnostics
 - Clang now diagnoses the requirement that non-template friend declarations with requires clauses
   and template friend declarations with a constraint that depends on a template parameter from an
   enclosing template must be a definition.
+- Clang now diagnoses function/variable templates that shadow their own template parameters, e.g. ``template<class T> void T();``.
 
 
 Improvements to Clang's time-trace
@@ -765,6 +768,12 @@ Bug Fixes in This Version
   Fixes (`#77583 <https://github.com/llvm/llvm-project/issues/77583>`_)
 - Fix an issue where CTAD fails for function-type/array-type arguments.
   Fixes (`#51710 <https://github.com/llvm/llvm-project/issues/51710>`_)
+- Fix crashes when using the binding decl from an invalid structured binding.
+  Fixes (`#67495 <https://github.com/llvm/llvm-project/issues/67495>`_) and
+  (`#72198 <https://github.com/llvm/llvm-project/issues/72198>`_)
+- Fix assertion failure when call noreturn-attribute function with musttail
+  attribute.
+  Fixes (`#76631 <https://github.com/llvm/llvm-project/issues/76631>`_)
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
