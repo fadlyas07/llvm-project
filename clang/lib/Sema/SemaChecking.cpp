@@ -2180,9 +2180,11 @@ static bool SemaBuiltinCpu(Sema &S, const TargetInfo &TI, CallExpr *TheCall,
 
   // Check the contents of the string.
   StringRef Feature = cast<StringLiteral>(Arg)->getString();
-  if (IsCPUSupports && !TheTI->validateCpuSupports(Feature))
-    return S.Diag(TheCall->getBeginLoc(), diag::err_invalid_cpu_supports)
-           << Arg->getSourceRange();
+  if (IsCPUSupports && !TheTI->validateCpuSupports(Feature)) {
+    S.Diag(TheCall->getBeginLoc(), diag::warn_invalid_cpu_supports)
+        << Arg->getSourceRange();
+    return false;
+  }
   if (!IsCPUSupports && !TheTI->validateCpuIs(Feature))
     return S.Diag(TheCall->getBeginLoc(), diag::err_invalid_cpu_is)
            << Arg->getSourceRange();
@@ -16586,13 +16588,16 @@ void Sema::DiagnoseAlwaysNonNullPointer(Expr *E,
   }
 
   // Complain if we are converting a lambda expression to a boolean value
-  if (const auto *MCallExpr = dyn_cast<CXXMemberCallExpr>(E)) {
-    if (const auto *MRecordDecl = MCallExpr->getRecordDecl();
-        MRecordDecl && MRecordDecl->isLambda()) {
-      Diag(E->getExprLoc(), diag::warn_impcast_pointer_to_bool)
-          << /*LambdaPointerConversionOperatorType=*/3
-          << MRecordDecl->getSourceRange() << Range << IsEqual;
-      return;
+  // outside of instantiation.
+  if (!inTemplateInstantiation()) {
+    if (const auto *MCallExpr = dyn_cast<CXXMemberCallExpr>(E)) {
+      if (const auto *MRecordDecl = MCallExpr->getRecordDecl();
+          MRecordDecl && MRecordDecl->isLambda()) {
+        Diag(E->getExprLoc(), diag::warn_impcast_pointer_to_bool)
+            << /*LambdaPointerConversionOperatorType=*/3
+            << MRecordDecl->getSourceRange() << Range << IsEqual;
+        return;
+      }
     }
   }
 
