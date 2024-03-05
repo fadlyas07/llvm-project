@@ -525,7 +525,9 @@ Register SPIRVGlobalRegistry::buildGlobalVariable(
 
   // Output decorations for the GV.
   // TODO: maybe move to GenerateDecorations pass.
-  if (IsConst)
+  const SPIRVSubtarget &ST =
+      cast<SPIRVSubtarget>(MIRBuilder.getMF().getSubtarget());
+  if (IsConst && ST.isOpenCLEnv())
     buildOpDecorate(Reg, MIRBuilder, SPIRV::Decoration::Constant, {});
 
   if (GVar && GVar->getAlign().valueOrOne().value() != 1) {
@@ -817,6 +819,15 @@ bool SPIRVGlobalRegistry::isScalarOrVectorOfType(Register VReg,
     return ScalarType->getOpcode() == TypeOpcode;
   }
   return false;
+}
+
+unsigned
+SPIRVGlobalRegistry::getScalarOrVectorComponentCount(Register VReg) const {
+  if (SPIRVType *Type = getSPIRVTypeForVReg(VReg))
+    return Type->getOpcode() == SPIRV::OpTypeVector
+               ? static_cast<unsigned>(Type->getOperand(2).getImm())
+               : 1;
+  return 0;
 }
 
 unsigned
