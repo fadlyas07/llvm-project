@@ -47,6 +47,12 @@ C++ Specific Potentially Breaking Changes
 
 ABI Changes in This Version
 ---------------------------
+- Fixed Microsoft name mangling of implicitly defined variables used for thread
+  safe static initialization of static local variables. This change resolves
+  incompatibilities with code compiled by MSVC but might introduce
+  incompatibilities with code compiled by earlier versions of Clang when an
+  inline member function that contains a static local variable with a dynamic
+  initializer is declared with ``__declspec(dllimport)``. (#GH83616).
 
 AST Dumping Potentially Breaking Changes
 ----------------------------------------
@@ -288,6 +294,9 @@ Bug Fixes in This Version
   by the C standard. This significantly improves codegen of `*` and `/` especially.
   Fixes (`#31205 <https://github.com/llvm/llvm-project/issues/31205>`_).
 
+- Fixes an assertion failure on invalid code when trying to define member
+  functions in lambdas.
+
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -381,6 +390,8 @@ Bug Fixes to C++ Support
   Fixes (#GH80997)
 - Fix an issue where missing set friend declaration in template class instantiation.
   Fixes (#GH84368).
+- Fixed a crash while checking constraints of a trailing requires-expression of a lambda, that the
+  expression references to an entity declared outside of the lambda. (#GH64808)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
