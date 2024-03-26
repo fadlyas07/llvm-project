@@ -201,6 +201,9 @@ Changes in existing checks
   <clang-tidy/checks/google/global-names-in-headers>` check by replacing the local
   option `HeaderFileExtensions` by the global option of the same name.
 
+- Improved :doc:`google-runtime-int <clang-tidy/checks/google/runtime-int>`
+  check performance through optimizations.
+
 - Improved :doc:`llvm-header-guard
   <clang-tidy/checks/llvm/header-guard>` check by replacing the local
   option `HeaderFileExtensions` by the global option of the same name.
@@ -239,6 +242,9 @@ Changes in existing checks
   analyzed, se the check now handles the common patterns
   `const auto e = (*vector_ptr)[i]` and `const auto e = vector_ptr->at(i);`.
 
+- Improved :doc:`modernize-use-using <clang-tidy/checks/modernize/use-using>`
+  check by adding support for detection of typedefs declared on function level.
+
 - Improved :doc:`readability-implicit-bool-conversion
   <clang-tidy/checks/readability/implicit-bool-conversion>` check to provide
   valid fix suggestions for ``static_cast`` without a preceding space and
@@ -252,6 +258,11 @@ Changes in existing checks
   <clang-tidy/checks/readability/identifier-naming>` check in `GetConfigPerFile`
   mode by resolving symbolic links to header files. Fixed handling of Hungarian
   Prefix when configured to `LowerCase`.
+
+- Improved :doc:`readability-static-definition-in-anonymous-namespace
+  <clang-tidy/checks/readability/static-definition-in-anonymous-namespace>`
+  check by resolving fix-it overlaps in template code by disregarding implicit
+  instances.
 
 Removed checks
 ^^^^^^^^^^^^^^
