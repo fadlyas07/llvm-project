@@ -9915,7 +9915,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     // FIXME: We need a better way to separate C++ standard and clang modules.
     bool ImplicitInlineCXX20 = !getLangOpts().CPlusPlusModules ||
                                !NewFD->getOwningModule() ||
-                               NewFD->getOwningModule()->isGlobalModule() ||
+                               NewFD->isFromExplicitGlobalModule() ||
                                NewFD->getOwningModule()->isHeaderLikeModule();
     bool isInline = D.getDeclSpec().isInlineSpecified();
     bool isVirtual = D.getDeclSpec().isVirtualSpecified();
@@ -18317,10 +18317,8 @@ CreateNewDecl:
   if (PrevDecl)
     mergeDeclAttributes(New, PrevDecl);
 
-  if (auto *CXXRD = dyn_cast<CXXRecordDecl>(New)) {
+  if (auto *CXXRD = dyn_cast<CXXRecordDecl>(New))
     inferGslOwnerPointerAttribute(CXXRD);
-    inferNullableClassAttribute(CXXRD);
-  }
 
   // If there's a #pragma GCC visibility in scope, set the visibility of this
   // record.
