@@ -13139,10 +13139,55 @@ Value *BoUpSLP::vectorizeTree(
       assert(Vec->getType()->isIntOrIntVectorTy() &&
              PrevVec->getType()->isIntOrIntVectorTy() &&
              "Expected integer vector types only.");
-      assert(MinBWs.contains(TE->UserTreeIndices.front().UserTE) &&
-             "Expected user in MinBWs.");
-      bool IsSigned = MinBWs.lookup(TE->UserTreeIndices.front().UserTE).second;
-      Vec = Builder.CreateIntCast(Vec, PrevVec->getType(), IsSigned);
+      std::optional<bool> IsSigned;
+      for (Value *V : TE->Scalars) {
+        if (const TreeEntry *BaseTE = getTreeEntry(V)) {
+          auto It = MinBWs.find(BaseTE);
+          if (It != MinBWs.end()) {
+            IsSigned = IsSigned.value_or(false) || It->second.second;
+            if (*IsSigned)
+              break;
+          }
+          for (const TreeEntry *MNTE : MultiNodeScalars.lookup(V)) {
+            auto It = MinBWs.find(MNTE);
+            if (It != MinBWs.end()) {
+              IsSigned = IsSigned.value_or(false) || It->second.second;
+              if (*IsSigned)
+                break;
+            }
+          }
+          if (IsSigned.value_or(false))
+            break;
+          // Scan through gather nodes.
+          for (const TreeEntry *BVE : ValueToGatherNodes.lookup(V)) {
+            auto It = MinBWs.find(BVE);
+            if (It != MinBWs.end()) {
+              IsSigned = IsSigned.value_or(false) || It->second.second;
+              if (*IsSigned)
+                break;
+            }
+          }
+          if (IsSigned.value_or(false))
+            break;
+          if (auto *EE = dyn_cast<ExtractElementInst>(V)) {
+            IsSigned =
+                IsSigned.value_or(false) ||
+                !isKnownNonNegative(EE->getVectorOperand(), SimplifyQuery(*DL));
+            continue;
+          }
+          if (IsSigned.value_or(false))
+            break;
+        }
+      }
+      if (IsSigned.value_or(false)) {
+        // Final attempt - check user node.
+        auto It = MinBWs.find(TE->UserTreeIndices.front().UserTE);
+        if (It != MinBWs.end())
+          IsSigned = It->second.second;
+      }
+      assert(IsSigned &&
+             "Expected user node or perfect diamond match in MinBWs.");
+      Vec = Builder.CreateIntCast(Vec, PrevVec->getType(), *IsSigned);
     }
     PrevVec->replaceAllUsesWith(Vec);
     PostponedValues.try_emplace(Vec).first->second.push_back(TE);
@@ -13362,7 +13407,7 @@ Value *BoUpSLP::vectorizeTree(
                   do {
                     IEBase = cast<InsertElementInst>(Base);
                     int IEIdx = *getInsertIndex(IEBase);
-                    assert(Mask[Idx] == PoisonMaskElem &&
+                    assert(Mask[IEIdx] == PoisonMaskElem &&
                            "InsertElementInstruction used already.");
                     Mask[IEIdx] = IEIdx;
                     Base = IEBase->getOperand(0);
@@ -14442,11 +14487,19 @@ bool BoUpSLP::collectValuesToDemote(
     }
     auto NumSignBits = ComputeNumSignBits(V, *DL, 0, AC, nullptr, DT);
     unsigned BitWidth1 = OrigBitWidth - NumSignBits;
-    if (!isKnownNonNegative(V, SimplifyQuery(*DL)))
+    bool IsSigned = !isKnownNonNegative(V, SimplifyQuery(*DL));
+    if (IsSigned)
       ++BitWidth1;
     if (auto *I = dyn_cast<Instruction>(V)) {
       APInt Mask = DB->getDemandedBits(I);
-      unsigned BitWidth2 = Mask.getBitWidth() - Mask.countl_zero();
+      unsigned BitWidth2 =
+          std::max<unsigned>(1, Mask.getBitWidth() - Mask.countl_zero());
+      while (!IsSigned && BitWidth2 < OrigBitWidth) {
+        APInt Mask = APInt::getBitsSetFrom(OrigBitWidth, BitWidth2 - 1);
+        if (MaskedValueIsZero(V, Mask, SimplifyQuery(*DL)))
+          break;
+        BitWidth2 *= 2;
+      }
       BitWidth1 = std::min(BitWidth1, BitWidth2);
     }
     BitWidth = std::max(BitWidth, BitWidth1);
@@ -15164,6 +15217,10 @@ bool SLPVectorizerPass::vectorizeStores(ArrayRef<StoreInst *> Stores,
   BoUpSLP::ValueSet VectorizedStores;
   bool Changed = false;
 
+  // Stores the pair of stores (first_store, last_store) in a range, that were
+  // already tried to be vectorized. Allows to skip the store ranges that were
+  // already tried to be vectorized but the attempts were unsuccessful.
+  DenseSet<std::pair<Value *, Value *>> TriedSequences;
   struct StoreDistCompare {
     bool operator()(const std::pair<unsigned, int> &Op1,
                     const std::pair<unsigned, int> &Op2) const {
@@ -15205,10 +15262,8 @@ bool SLPVectorizerPass::vectorizeStores(ArrayRef<StoreInst *> Stores,
       Type *ValueTy = StoreTy;
       if (auto *Trunc = dyn_cast<TruncInst>(Store->getValueOperand()))
         ValueTy = Trunc->getSrcTy();
-      unsigned MinVF = std::max<unsigned>(
-          2, PowerOf2Ceil(TTI->getStoreMinimumVF(
-                 R.getMinVF(DL->getTypeStoreSizeInBits(StoreTy)), StoreTy,
-                 ValueTy)));
+      unsigned MinVF = PowerOf2Ceil(TTI->getStoreMinimumVF(
+          R.getMinVF(DL->getTypeStoreSizeInBits(StoreTy)), StoreTy, ValueTy));
 
       if (MaxVF < MinVF) {
         LLVM_DEBUG(dbgs() << "SLP: Vectorization infeasible as MaxVF (" << MaxVF
@@ -15234,74 +15289,40 @@ bool SLPVectorizerPass::vectorizeStores(ArrayRef<StoreInst *> Stores,
         VF = Size > MaxVF ? NonPowerOf2VF : Size;
         Size *= 2;
       });
-      unsigned End = Operands.size();
-      unsigned Repeat = 0;
-      constexpr unsigned MaxAttempts = 2;
-      SmallBitVector Range(Operands.size());
-      while (true) {
-        ++Repeat;
-        for (unsigned Size : CandidateVFs) {
-          int StartIdx = Range.find_first_unset();
-          while (StartIdx != -1) {
-            int EndIdx = Range.find_next(StartIdx);
-            unsigned Sz = EndIdx == -1 ? End : EndIdx;
-            for (unsigned Cnt = StartIdx; Cnt + Size <= Sz;) {
-              ArrayRef<Value *> Slice = ArrayRef(Operands).slice(Cnt, Size);
-              assert(all_of(Slice,
-                            [&](Value *V) {
-                              return cast<StoreInst>(V)
-                                         ->getValueOperand()
-                                         ->getType() ==
-                                     cast<StoreInst>(Slice.front())
-                                         ->getValueOperand()
-                                         ->getType();
-                            }) &&
-                     "Expected all operands of same type.");
-              if (vectorizeStoreChain(Slice, R, Cnt, MinVF)) {
-                // Mark the vectorized stores so that we don't vectorize them
-                // again.
-                VectorizedStores.insert(Slice.begin(), Slice.end());
-                // Mark the vectorized stores so that we don't vectorize them
-                // again.
-                Changed = true;
-                // If we vectorized initial block, no need to try to vectorize
-                // it again.
-                Range.set(Cnt, Cnt + Size);
-                if (Cnt < StartIdx + MinVF)
-                  Range.set(StartIdx, Cnt);
-                if (Cnt > EndIdx - Size - MinVF) {
-                  Range.set(Cnt + Size, EndIdx);
-                  End = Cnt;
-                }
-                Cnt += Size;
-                continue;
-              }
-              ++Cnt;
-            }
-            if (Sz >= End)
-              break;
-            StartIdx = Range.find_next_unset(EndIdx);
+      unsigned StartIdx = 0;
+      for (unsigned Size : CandidateVFs) {
+        for (unsigned Cnt = StartIdx, E = Operands.size(); Cnt + Size <= E;) {
+          ArrayRef<Value *> Slice = ArrayRef(Operands).slice(Cnt, Size);
+          assert(
+              all_of(
+                  Slice,
+                  [&](Value *V) {
+                    return cast<StoreInst>(V)->getValueOperand()->getType() ==
+                           cast<StoreInst>(Slice.front())
+                               ->getValueOperand()
+                               ->getType();
+                  }) &&
+              "Expected all operands of same type.");
+          if (!VectorizedStores.count(Slice.front()) &&
+              !VectorizedStores.count(Slice.back()) &&
+              TriedSequences.insert(std::make_pair(Slice.front(), Slice.back()))
+                  .second &&
+              vectorizeStoreChain(Slice, R, Cnt, MinVF)) {
+            // Mark the vectorized stores so that we don't vectorize them again.
+            VectorizedStores.insert(Slice.begin(), Slice.end());
+            Changed = true;
+            // If we vectorized initial block, no need to try to vectorize it
+            // again.
+            if (Cnt == StartIdx)
+              StartIdx += Size;
+            Cnt += Size;
+            continue;
           }
+          ++Cnt;
         }
-        // All values vectorize - exit.
-        if (Range.all())
+        // Check if the whole array was vectorized already - exit.
+        if (StartIdx >= Operands.size())
           break;
-        // Check if tried all attempts or no need for the last attempts at all.
-        if (Repeat >= MaxAttempts)
-          break;
-        constexpr unsigned MaxVFScale = 4;
-        constexpr unsigned StoresLimit = 16;
-        const unsigned MaxTotalNum = std::min(
-            std::max<unsigned>(StoresLimit, MaxVFScale * MaxVF),
-            bit_floor(static_cast<unsigned>(Range.find_last_unset() -
-                                            Range.find_first_unset() + 1)));
-        if (MaxVF >= MaxTotalNum)
-          break;
-        // Last attempt to vectorize max number of elements, if all previous
-        // attempts were unsuccessful because of the cost issues.
-        CandidateVFs.clear();
-        for (unsigned Size = MaxTotalNum; Size > MaxVF; Size /= 2)
-          CandidateVFs.push_back(Size);
       }
     }
   };
