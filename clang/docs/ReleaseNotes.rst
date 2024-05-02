@@ -90,6 +90,25 @@ Clang Frontend Potentially Breaking Changes
   of ``-Wno-gnu-binary-literal`` will no longer silence this pedantic warning,
   which may break existing uses with ``-Werror``.
 
+- The normalization of 3 element target triples where ``-none-`` is the middle
+  element has changed. For example, ``armv7m-none-eabi`` previously normalized
+  to ``armv7m-none-unknown-eabi``, with ``none`` for the vendor and ``unknown``
+  for the operating system. It now normalizes to ``armv7m-unknown-none-eabi``,
+  which has ``unknown`` vendor and ``none`` operating system.
+
+  The affected triples are primarily for bare metal Arm where it is intended
+  that ``none`` means that there is no operating system. As opposed to an unknown
+  type of operating system.
+
+  This change my cause clang to not find libraries, or libraries to be built at
+  different file system locations. This can be fixed by changing your builds to
+  use the new normalized triple. However, we recommend instead getting the
+  normalized triple from clang itself, as this will make your builds more
+  robust in case of future changes::
+
+    $ clang --target=<your target triple> -print-target-triple
+    <the normalized target triple>
+
 What's New in Clang |release|?
 ==============================
 Some of the major new features and improvements to Clang are listed
@@ -649,6 +668,7 @@ Bug Fixes to C++ Support
 - Fix a bug on template partial specialization with issue on deduction of nontype template parameter
   whose type is `decltype(auto)`. Fixes (#GH68885).
 - Clang now correctly treats the noexcept-specifier of a friend function to be a complete-class context.
+- Fix an assertion failure when parsing an invalid members of an anonymous class. (#GH85447)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
