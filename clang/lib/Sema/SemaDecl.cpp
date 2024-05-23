@@ -50,6 +50,7 @@
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaRISCV.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/SmallString.h"
@@ -8926,8 +8927,8 @@ void Sema::CheckVariableDeclarationType(VarDecl *NewVD) {
     const FunctionDecl *FD = cast<FunctionDecl>(CurContext);
     llvm::StringMap<bool> CallerFeatureMap;
     Context.getFunctionFeatureMap(CallerFeatureMap, FD);
-    checkRVVTypeSupport(T, NewVD->getLocation(), cast<Decl>(CurContext),
-                        CallerFeatureMap);
+    RISCV().checkRVVTypeSupport(T, NewVD->getLocation(), cast<Decl>(CurContext),
+                                CallerFeatureMap);
   }
 }
 
@@ -11867,8 +11868,8 @@ static bool CheckMultiVersionFunction(Sema &S, FunctionDecl *NewFD,
     return false;
 
   if (!OldDecl || !OldDecl->getAsFunction() ||
-      OldDecl->getDeclContext()->getRedeclContext() !=
-          NewFD->getDeclContext()->getRedeclContext()) {
+      !OldDecl->getDeclContext()->getRedeclContext()->Equals(
+          NewFD->getDeclContext()->getRedeclContext())) {
     // If there's no previous declaration, AND this isn't attempting to cause
     // multiversioning, this isn't an error condition.
     if (MVKind == MultiVersionKind::None)
