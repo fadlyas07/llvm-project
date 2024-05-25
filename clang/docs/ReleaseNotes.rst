@@ -342,6 +342,10 @@ New Compiler Flags
   ``__attribute__((section(...)))``. This enables linker GC to collect unused
   symbols without having to use a per-symbol section.
 
+- ``-fms-define-stdc`` and its clang-cl counterpart ``/Zc:__STDC__``.
+  Matches MSVC behaviour by defining ``__STDC__`` to ``1`` when
+  MSVC compatibility mode is used. It has no effect for C++ code.
+
 Deprecated Compiler Flags
 -------------------------
 
@@ -877,6 +881,10 @@ Windows Support
   This also means that if all intrinsic features are enabled at compile time
   including STL headers will no longer slow down compile times since ``intrin.h``
   is not included from MSVC STL.
+
+- When the target triple is `*-windows-msvc` strict aliasing is now disabled by default
+  to ensure compatibility with msvc. Previously strict aliasing was only disabled if the
+  driver mode was cl.
 
 LoongArch Support
 ^^^^^^^^^^^^^^^^^
