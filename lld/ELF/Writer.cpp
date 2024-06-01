@@ -936,33 +936,35 @@ findOrphanPos(SmallVectorImpl<SectionCommand *>::iterator b,
   }
 
   // Find the first element that has as close a rank as possible.
-  auto i = std::max_element(b, e, [=](SectionCommand *a, SectionCommand *b) {
-    return getRankProximity(sec, a) < getRankProximity(sec, b);
-  });
-  if (i == e)
+  if (b == e)
     return e;
+  int proximity = getRankProximity(sec, *b);
+  auto i = b;
+  for (auto j = b; ++j != e;) {
+    int p = getRankProximity(sec, *j);
+    if (p > proximity) {
+      proximity = p;
+      i = j;
+    }
+  }
   if (!isa<OutputDesc>(*i))
     return e;
-  auto foundSec = &cast<OutputDesc>(*i)->osec;
 
-  // Consider all existing sections with the same proximity.
-  int proximity = getRankProximity(sec, *i);
-  unsigned sortRank = sec->sortRank;
-  if (script->hasPhdrsCommands() || !script->memoryRegions.empty())
-    // Prevent the orphan section to be placed before the found section. If
-    // custom program headers are defined, that helps to avoid adding it to a
-    // previous segment and changing flags of that segment, for example, making
-    // a read-only segment writable. If memory regions are defined, an orphan
-    // section should continue the same region as the found section to better
-    // resemble the behavior of GNU ld.
-    sortRank = std::max(sortRank, foundSec->sortRank);
-  for (; i != e; ++i) {
-    auto *curSecDesc = dyn_cast<OutputDesc>(*i);
-    if (!curSecDesc || !curSecDesc->osec.hasInputSections)
-      continue;
-    if (getRankProximity(sec, curSecDesc) != proximity ||
-        sortRank < curSecDesc->osec.sortRank)
-      break;
+  // If i's rank is larger, the orphan section can be placed before i.
+  //
+  // However, don't do this if custom program headers are defined. Otherwise,
+  // adding the orphan to a previous segment can change its flags, for example,
+  // making a read-only segment writable. If memory regions are defined, an
+  // orphan section should continue the same region as the found section to
+  // better resemble the behavior of GNU ld.
+  bool mustAfter = script->hasPhdrsCommands() || !script->memoryRegions.empty();
+  if (cast<OutputDesc>(*i)->osec.sortRank <= sec->sortRank || mustAfter) {
+    while (++i != e) {
+      auto *cur = dyn_cast<OutputDesc>(*i);
+      if (cur && cur->osec.hasInputSections &&
+          getRankProximity(sec, cur) != proximity)
+        break;
+    }
   }
 
   auto isOutputSecWithInputSections = [](SectionCommand *cmd) {
