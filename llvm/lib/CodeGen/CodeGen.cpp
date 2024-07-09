@@ -63,7 +63,7 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeLiveIntervalsPass(Registry);
   initializeLiveRangeShrinkPass(Registry);
   initializeLiveStacksPass(Registry);
-  initializeLiveVariablesPass(Registry);
+  initializeLiveVariablesWrapperPassPass(Registry);
   initializeLocalStackSlotPassPass(Registry);
   initializeLowerGlobalDtorsLegacyPassPass(Registry);
   initializeLowerIntrinsicsPass(Registry);
@@ -84,7 +84,7 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeMachineFunctionPrinterPassPass(Registry);
   initializeMachineLateInstrsCleanupPass(Registry);
   initializeMachineLICMPass(Registry);
-  initializeMachineLoopInfoPass(Registry);
+  initializeMachineLoopInfoWrapperPassPass(Registry);
   initializeMachineModuleInfoWrapperPassPass(Registry);
   initializeMachineOptimizationRemarkEmitterPassPass(Registry);
   initializeMachineOutlinerPass(Registry);

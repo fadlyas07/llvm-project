@@ -973,6 +973,8 @@ Bug Fixes to C++ Support
   of the address of operator. (#GH97483).
 - Fixed an assertion failure about a constant expression which is a known integer but is not
   evaluated to an integer. (#GH96670).
+- Fixed a bug where references to lambda capture inside a ``noexcept`` specifier were not correctly
+  instantiated. (#GH95735).
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1082,6 +1084,7 @@ RISC-V Support
 
 - ``__attribute__((rvv_vector_bits(N)))`` is now supported for RVV vbool*_t types.
 - Profile names in ``-march`` option are now supported.
+- Passing empty structs/unions as arguments in C++ is now handled correctly. The behavior is similar to GCC's.
 
 CUDA/HIP Language Changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^
