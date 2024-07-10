@@ -197,8 +197,8 @@ public:
     AU.addUsedIfAvailable<AAResultsWrapperPass>();
     AU.addUsedIfAvailable<LiveVariablesWrapperPass>();
     AU.addPreserved<LiveVariablesWrapperPass>();
-    AU.addPreserved<SlotIndexes>();
-    AU.addPreserved<LiveIntervals>();
+    AU.addPreserved<SlotIndexesWrapperPass>();
+    AU.addPreserved<LiveIntervalsWrapperPass>();
     AU.addPreservedID(MachineLoopInfoID);
     AU.addPreservedID(MachineDominatorsID);
     MachineFunctionPass::getAnalysisUsage(AU);
@@ -1764,7 +1764,8 @@ bool TwoAddressInstructionPass::runOnMachineFunction(MachineFunction &Func) {
   InstrItins = MF->getSubtarget().getInstrItineraryData();
   auto *LVWrapper = getAnalysisIfAvailable<LiveVariablesWrapperPass>();
   LV = LVWrapper ? &LVWrapper->getLV() : nullptr;
-  LIS = getAnalysisIfAvailable<LiveIntervals>();
+  auto *LISWrapper = getAnalysisIfAvailable<LiveIntervalsWrapperPass>();
+  LIS = LISWrapper ? &LISWrapper->getLIS() : nullptr;
   if (auto *AAPass = getAnalysisIfAvailable<AAResultsWrapperPass>())
     AA = &AAPass->getAAResults();
   else
