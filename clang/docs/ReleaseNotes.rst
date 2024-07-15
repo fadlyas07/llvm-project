@@ -313,10 +313,6 @@ Resolutions to C++ Defect Reports
 - Clang now considers ``noexcept(typeid(expr))`` more carefully, instead of always assuming that ``std::bad_typeid`` can be thrown.
   (`CWG2191: Incorrect result for noexcept(typeid(v)) <https://cplusplus.github.io/CWG/issues/2191.html>`_).
 
-- Clang now correctly implements lookup for the terminal name of a member-qualified nested-name-specifier.
-  (`CWG1835: Dependent member lookup before < <https://cplusplus.github.io/CWG/issues/1835.html>`_).
-  The warning can be disabled via `-Wno-missing-dependent-template-keyword`.
-
 C Language Changes
 ------------------
 
@@ -1041,6 +1037,7 @@ Bug Fixes to C++ Support
   (#GH48937)
 - Fix a crash when parsing an invalid type-requirement in a requires expression. (#GH51868)
 - Fix parsing of built-in type-traits such as ``__is_pointer`` in libstdc++ headers. (#GH95598)
+- Fixed failed assertion when resolving context of defaulted comparison method outside of struct. (#GH96043).
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1191,6 +1188,8 @@ DWARF Support in Clang
 
 Floating Point Support in Clang
 -------------------------------
+
+- Add ``__builtin__fmaf16`` builtin for floating point types.
 
 Fixed Point Support in Clang
 ----------------------------
