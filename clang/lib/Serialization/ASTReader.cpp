@@ -104,6 +104,7 @@
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -3926,6 +3927,13 @@ llvm::Error ASTReader::ReadASTBlock(ModuleFile &F,
       }
       break;
 
+    case VTABLES_TO_EMIT:
+      if (F.Kind == MK_MainFile ||
+          getContext().getLangOpts().BuildingPCHWithObjectFile)
+        for (unsigned I = 0, N = Record.size(); I != N;)
+          VTablesToEmit.push_back(ReadDeclID(F, Record, I));
+      break;
+
     case IMPORTED_MODULES:
       if (!F.isModule()) {
         // If we aren't loading a module (which has its own exports), make
@@ -7439,6 +7447,11 @@ QualType ASTReader::GetType(TypeID ID) {
     T = Context.SingletonId;                                                   \
     break;
 #include "clang/Basic/AMDGPUTypes.def"
+#define HLSL_INTANGIBLE_TYPE(Name, Id, SingletonId)                            \
+  case PREDEF_TYPE_##Id##_ID:                                                  \
+    T = Context.SingletonId;                                                   \
+    break;
+#include "clang/Basic/HLSLIntangibleTypes.def"
     }
 
     assert(!T.isNull() && "Unknown predefined type");
@@ -8114,6 +8127,10 @@ void ASTReader::PassInterestingDeclToConsumer(Decl *D) {
     PassObjCImplDeclToConsumer(ImplD, Consumer);
   else
     Consumer->HandleInterestingDecl(DeclGroupRef(D));
+}
+
+void ASTReader::PassVTableToConsumer(CXXRecordDecl *RD) {
+  Consumer->HandleVTable(RD);
 }
 
 void ASTReader::StartTranslationUnit(ASTConsumer *Consumer) {
@@ -10463,6 +10480,28 @@ OMPClause *OMPClauseReader::readClause() {
   case llvm::omp::OMPC_acq_rel:
     C = new (Context) OMPAcqRelClause();
     break;
+  case llvm::omp::OMPC_absent: {
+    unsigned NumKinds = Record.readInt();
+    C = OMPAbsentClause::CreateEmpty(Context, NumKinds);
+    break;
+  }
+  case llvm::omp::OMPC_holds:
+    C = new (Context) OMPHoldsClause();
+    break;
+  case llvm::omp::OMPC_contains: {
+    unsigned NumKinds = Record.readInt();
+    C = OMPContainsClause::CreateEmpty(Context, NumKinds);
+    break;
+  }
+  case llvm::omp::OMPC_no_openmp:
+    C = new (Context) OMPNoOpenMPClause();
+    break;
+  case llvm::omp::OMPC_no_openmp_routines:
+    C = new (Context) OMPNoOpenMPRoutinesClause();
+    break;
+  case llvm::omp::OMPC_no_parallelism:
+    C = new (Context) OMPNoParallelismClause();
+    break;
   case llvm::omp::OMPC_acquire:
     C = new (Context) OMPAcquireClause();
     break;
@@ -10569,7 +10608,7 @@ OMPClause *OMPClauseReader::readClause() {
     break;
   }
   case llvm::omp::OMPC_num_teams:
-    C = new (Context) OMPNumTeamsClause();
+    C = OMPNumTeamsClause::CreateEmpty(Context, Record.readInt());
     break;
   case llvm::omp::OMPC_thread_limit:
     C = new (Context) OMPThreadLimitClause();
@@ -10862,6 +10901,40 @@ void OMPClauseReader::VisitOMPFailClause(OMPFailClause *C) {
   OpenMPClauseKind CKind = Record.readEnum<OpenMPClauseKind>();
   C->setFailParameter(CKind);
 }
+
+void OMPClauseReader::VisitOMPAbsentClause(OMPAbsentClause *C) {
+  unsigned Count = C->getDirectiveKinds().size();
+  C->setLParenLoc(Record.readSourceLocation());
+  llvm::SmallVector<OpenMPDirectiveKind, 4> DKVec;
+  DKVec.reserve(Count);
+  for (unsigned I = 0; I < Count; I++) {
+    DKVec.push_back(Record.readEnum<OpenMPDirectiveKind>());
+  }
+  C->setDirectiveKinds(DKVec);
+}
+
+void OMPClauseReader::VisitOMPHoldsClause(OMPHoldsClause *C) {
+  C->setExpr(Record.readExpr());
+  C->setLParenLoc(Record.readSourceLocation());
+}
+
+void OMPClauseReader::VisitOMPContainsClause(OMPContainsClause *C) {
+  unsigned Count = C->getDirectiveKinds().size();
+  C->setLParenLoc(Record.readSourceLocation());
+  llvm::SmallVector<OpenMPDirectiveKind, 4> DKVec;
+  DKVec.reserve(Count);
+  for (unsigned I = 0; I < Count; I++) {
+    DKVec.push_back(Record.readEnum<OpenMPDirectiveKind>());
+  }
+  C->setDirectiveKinds(DKVec);
+}
+
+void OMPClauseReader::VisitOMPNoOpenMPClause(OMPNoOpenMPClause *) {}
+
+void OMPClauseReader::VisitOMPNoOpenMPRoutinesClause(
+    OMPNoOpenMPRoutinesClause *) {}
+
+void OMPClauseReader::VisitOMPNoParallelismClause(OMPNoParallelismClause *) {}
 
 void OMPClauseReader::VisitOMPSeqCstClause(OMPSeqCstClause *) {}
 
@@ -11357,8 +11430,15 @@ void OMPClauseReader::VisitOMPAllocateClause(OMPAllocateClause *C) {
 
 void OMPClauseReader::VisitOMPNumTeamsClause(OMPNumTeamsClause *C) {
   VisitOMPClauseWithPreInit(C);
-  C->setNumTeams(Record.readSubExpr());
   C->setLParenLoc(Record.readSourceLocation());
+  unsigned NumVars = C->varlist_size();
+  SmallVector<Expr *, 16> Vars;
+  Vars.reserve(NumVars);
+  for ([[maybe_unused]] auto _ : llvm::seq<unsigned>(NumVars)) {
+    (void)_;
+    Vars.push_back(Record.readSubExpr());
+  }
+  C->setVarRefs(Vars);
 }
 
 void OMPClauseReader::VisitOMPThreadLimitClause(OMPThreadLimitClause *C) {
