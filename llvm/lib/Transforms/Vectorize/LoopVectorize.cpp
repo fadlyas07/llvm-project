@@ -5386,8 +5386,18 @@ void LoopVectorizationCostModel::collectInstsToScalarize(ElementCount VF) {
         // 3. Emulated masked memrefs, if a hacked cost is needed.
         if (!isScalarAfterVectorization(&I, VF) && !VF.isScalable() &&
             !useEmulatedMaskMemRefHack(&I, VF) &&
-            computePredInstDiscount(&I, ScalarCosts, VF) >= 0)
+            computePredInstDiscount(&I, ScalarCosts, VF) >= 0) {
           ScalarCostsVF.insert(ScalarCosts.begin(), ScalarCosts.end());
+          // Check if we decided to scalarize a call. If so, update the widening
+          // decision of the call to CM_Scalarize with the computed scalar cost.
+          for (const auto &[I, _] : ScalarCosts) {
+            auto *CI = dyn_cast<CallInst>(I);
+            if (!CI || !CallWideningDecisions.contains({CI, VF}))
+              continue;
+            CallWideningDecisions[{CI, VF}].Kind = CM_Scalarize;
+            CallWideningDecisions[{CI, VF}].Cost = ScalarCosts[CI];
+          }
+        }
         // Remember that BB will remain after vectorization.
         PredicatedBBsAfterVectorization[VF].insert(BB);
         for (auto *Pred : predecessors(BB)) {
@@ -8393,6 +8403,20 @@ VPWidenRecipe *VPRecipeBuilder::tryToWiden(Instruction *I,
   case Instruction::Sub:
   case Instruction::Xor:
   case Instruction::Freeze:
+    if (I->getOpcode() == Instruction::Mul) {
+      // Simplify operands of multiplications using SCEV. This is needed at the
+      // moment to match the behavior of the legacy cost-model.
+      // TODO: Generalize to any opcode and move to VPlan transformation.
+      SmallVector<VPValue *> NewOps(Operands);
+      ScalarEvolution &SE = *PSE.getSE();
+      for (unsigned I = 0; I < Operands.size(); ++I) {
+        Value *V = NewOps[I]->getUnderlyingValue();
+        if (!isa<Constant>(V) && SE.isSCEVable(V->getType()))
+          if (auto *C = dyn_cast<SCEVConstant>(PSE.getSE()->getSCEV(V)))
+            NewOps[I] = Plan.getOrAddLiveIn(C->getValue());
+      }
+      return new VPWidenRecipe(*I, make_range(NewOps.begin(), NewOps.end()));
+    }
     return new VPWidenRecipe(*I, make_range(Operands.begin(), Operands.end()));
   };
 }
