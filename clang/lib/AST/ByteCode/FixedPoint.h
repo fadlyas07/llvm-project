@@ -23,14 +23,19 @@ using APSInt = llvm::APSInt;
 class FixedPoint final {
 private:
   llvm::APFixedPoint V;
-  FixedPoint(llvm::APFixedPoint &&V) : V(std::move(V)) {}
 
 public:
+  FixedPoint(llvm::APFixedPoint &&V) : V(std::move(V)) {}
+  FixedPoint(llvm::APFixedPoint &V) : V(V) {}
   FixedPoint(APInt V, llvm::FixedPointSemantics Sem) : V(V, Sem) {}
   // This needs to be default-constructible so llvm::endian::read works.
   FixedPoint()
       : V(APInt(0, 0ULL, false),
           llvm::FixedPointSemantics(0, 0, false, false, false)) {}
+
+  static FixedPoint Zero(llvm::FixedPointSemantics Sem) {
+    return FixedPoint(APInt(Sem.getWidth(), 0ULL, Sem.isSigned()), Sem);
+  }
 
   operator bool() const { return V.getBoolValue(); }
   template <typename Ty, typename = std::enable_if_t<std::is_integral_v<Ty>>>
@@ -46,6 +51,10 @@ public:
 
   unsigned bitWidth() const { return V.getWidth(); }
   bool isSigned() const { return V.isSigned(); }
+
+  llvm::APFloat toFloat(const llvm::fltSemantics *Sem) const {
+    return V.convertToFloat(*Sem);
+  }
 
   ComparisonCategoryResult compare(const FixedPoint &Other) const {
     if (Other.V == V)

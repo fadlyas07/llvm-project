@@ -200,10 +200,10 @@ struct ErrorPlace {
 };
 
 // Returns input section and corresponding source string for the given location.
-ErrorPlace getErrorPlace(const uint8_t *loc);
+ErrorPlace getErrorPlace(Ctx &ctx, const uint8_t *loc);
 
 static inline std::string getErrorLocation(const uint8_t *loc) {
-  return getErrorPlace(loc).loc;
+  return getErrorPlace(ctx, loc).loc;
 }
 
 void processArmCmseSymbols();
@@ -241,14 +241,14 @@ void convertArmInstructionstoBE8(InputSection *sec, uint8_t *buf);
 void createTaggedSymbols(const SmallVector<ELFFileBase *, 0> &files);
 void initSymbolAnchors();
 
-TargetInfo *getTarget();
+TargetInfo *getTarget(Ctx &ctx);
 
 template <class ELFT> bool isMipsPIC(const Defined *sym);
 
 void reportRangeError(uint8_t *loc, const Relocation &rel, const Twine &v,
                       int64_t min, uint64_t max);
-void reportRangeError(uint8_t *loc, int64_t v, int n, const Symbol &sym,
-                      const Twine &msg);
+void reportRangeError(Ctx &ctx, uint8_t *loc, int64_t v, int n,
+                      const Symbol &sym, const Twine &msg);
 
 // Make sure that V can be represented as an N bit signed integer.
 inline void checkInt(uint8_t *loc, int64_t v, int n, const Relocation &rel) {
