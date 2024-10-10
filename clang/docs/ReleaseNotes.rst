@@ -174,10 +174,6 @@ C++23 Feature Support
 C++20 Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
 
-C++17 Feature Support
-^^^^^^^^^^^^^^^^^^^^^
-- The implementation of the relaxed template template argument matching rules is
-  more complete and reliable, and should provide more accurate diagnostics.
 
 Resolutions to C++ Defect Reports
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -335,10 +331,6 @@ Improvements to Clang's diagnostics
 
 - Clang now diagnoses when the result of a [[nodiscard]] function is discarded after being cast in C. Fixes #GH104391.
 
-- Clang now properly explains the reason a template template argument failed to
-  match a template template parameter, in terms of the C++17 relaxed matching rules
-  instead of the old ones.
-
 - Don't emit duplicated dangling diagnostics. (#GH93386).
 
 - Improved diagnostic when trying to befriend a concept. (#GH45182).
@@ -380,6 +372,10 @@ Improvements to Clang's diagnostics
 
 - Clang now omits warnings for extra parentheses in fold expressions with single expansion (#GH101863).
 
+- The warning for an unsupported type for a named register variable is now phrased ``unsupported type for named register variable``,
+  instead of ``bad type for named register variable``. This makes it clear that the type is not supported at all, rather than being
+  suboptimal in some way the error fails to mention (#GH111550).
+
 Improvements to Clang's time-trace
 ----------------------------------
 
@@ -407,6 +403,8 @@ Bug Fixes to Compiler Builtins
   that was not instantiated elsewhere.
 
 - ``__noop`` can now be used in a constant expression. (#GH102064)
+
+- Fix ``__has_builtin`` incorrectly returning ``false`` for some C++ type traits. (#GH111477)
 
 Bug Fixes to Attribute Support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -442,8 +440,6 @@ Bug Fixes to C++ Support
 - Correctly check constraints of explicit instantiations of member functions. (#GH46029)
 - When performing partial ordering of function templates, clang now checks that
   the deduction was consistent. Fixes (#GH18291).
-- Fixes to several issues in partial ordering of template template parameters, which
-  were documented in the test suite.
 - Fixed an assertion failure about a constraint of a friend function template references to a value with greater
   template depth than the friend function template. (#GH98258)
 - Clang now rebuilds the template parameters of out-of-line declarations and specializations in the context
@@ -481,9 +477,7 @@ Bug Fixes to C++ Support
   in certain friend declarations. (#GH93099)
 - Clang now instantiates the correct lambda call operator when a lambda's class type is
   merged across modules. (#GH110401)
-- Clang now uses the correct set of template argument lists when comparing the constraints of
-  out-of-line definitions and member templates explicitly specialized for a given implicit instantiation of
-  a class template. (#GH102320)
+- Fix a crash when parsing a pseudo destructor involving an invalid type. (#GH111460)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
