@@ -638,9 +638,6 @@ protected:
   /// there can be multiple exiting edges reaching this block.
   BasicBlock *LoopExitBlock;
 
-  /// The scalar loop body.
-  BasicBlock *LoopScalarBody;
-
   /// A list of all bypass blocks. The first block is the entry of the loop.
   SmallVector<BasicBlock *, 4> LoopBypassBlocks;
 
@@ -1430,12 +1427,9 @@ public:
     // Override forced styles if needed.
     // FIXME: use actual opcode/data type for analysis here.
     // FIXME: Investigate opportunity for fixed vector factor.
-    bool EVLIsLegal =
-        IsScalableVF && UserIC <= 1 &&
-        TTI.hasActiveVectorLength(0, nullptr, Align()) &&
-        !EnableVPlanNativePath &&
-        // FIXME: implement support for max safe dependency distance.
-        Legal->isSafeForAnyVectorWidth();
+    bool EVLIsLegal = UserIC <= 1 &&
+                      TTI.hasActiveVectorLength(0, nullptr, Align()) &&
+                      !EnableVPlanNativePath;
     if (!EVLIsLegal) {
       // If for some reason EVL mode is unsupported, fallback to
       // DataWithoutLaneMask to try to vectorize the loop with folded tail
@@ -1459,6 +1453,15 @@ public:
     // IVUpdateMayOverflow flag in getTailFoldingStyle.
     return getTailFoldingStyle() != TailFoldingStyle::None;
   }
+
+  /// Return maximum safe number of elements to be processed per vector
+  /// iteration, which do not prevent store-load forwarding and are safe with
+  /// regard to the memory dependencies. Required for EVL-based VPlans to
+  /// correctly calculate AVL (application vector length) as min(remaining AVL,
+  /// MaxSafeElements).
+  /// TODO: need to consider adjusting cost model to use this value as a
+  /// vectorization factor for EVL-based vectorization.
+  std::optional<unsigned> getMaxSafeElements() const { return MaxSafeElements; }
 
   /// Returns true if the instructions in this block requires predication
   /// for any reason, e.g. because tail folding now requires a predicate
@@ -1610,6 +1613,12 @@ private:
 
   /// true if scalable vectorization is supported and enabled.
   std::optional<bool> IsScalableVectorizationAllowed;
+
+  /// Maximum safe number of elements to be processed per vector iteration,
+  /// which do not prevent store-load forwarding and are safe with regard to the
+  /// memory dependencies. Required for EVL-based veectorization, where this
+  /// value is used as the upper bound of the safe AVL.
+  std::optional<unsigned> MaxSafeElements;
 
   /// A map holding scalar costs for different vectorization factors. The
   /// presence of a cost for an instruction in the mapping indicates that the
@@ -2530,7 +2539,6 @@ BasicBlock *InnerLoopVectorizer::emitMemRuntimeChecks(BasicBlock *Bypass) {
 }
 
 void InnerLoopVectorizer::createVectorLoopSkeleton(StringRef Prefix) {
-  LoopScalarBody = OrigLoop->getHeader();
   LoopVectorPreHeader = OrigLoop->getLoopPreheader();
   assert(LoopVectorPreHeader && "Invalid loop structure");
   LoopExitBlock = OrigLoop->getUniqueExitBlock(); // may be nullptr
@@ -2944,7 +2952,7 @@ void InnerLoopVectorizer::fixVectorizedLoop(VPTransformState &State,
 
   // Set/update profile weights for the vector and remainder loops as original
   // loop iterations are now distributed among them. Note that original loop
-  // represented by LoopScalarBody becomes remainder loop after vectorization.
+  // becomes the scalar remainder loop after vectorization.
   //
   // For cases like foldTailByMasking() and requiresScalarEpiloque() we may
   // end up getting slightly roughened result but that should be OK since
@@ -2952,12 +2960,11 @@ void InnerLoopVectorizer::fixVectorizedLoop(VPTransformState &State,
   // vector code caused by legality checks is ignored, assigning all the weight
   // to the vector loop, optimistically.
   //
-  // For scalable vectorization we can't know at compile time how many iterations
-  // of the loop are handled in one vector iteration, so instead assume a pessimistic
-  // vscale of '1'.
-  Loop *ScalarLoop = LI->getLoopFor(LoopScalarBody);
+  // For scalable vectorization we can't know at compile time how many
+  // iterations of the loop are handled in one vector iteration, so instead
+  // assume a pessimistic vscale of '1'.
   Loop *VectorLoop = LI->getLoopFor(HeaderBB);
-  setProfileInfoAfterUnrolling(ScalarLoop, VectorLoop, ScalarLoop,
+  setProfileInfoAfterUnrolling(OrigLoop, VectorLoop, OrigLoop,
                                VF.getKnownMinValue() * UF);
 }
 
@@ -3863,6 +3870,8 @@ FixedScalableVFPair LoopVectorizationCostModel::computeFeasibleMaxVF(
 
   auto MaxSafeFixedVF = ElementCount::getFixed(MaxSafeElements);
   auto MaxSafeScalableVF = getMaxLegalScalableVF(MaxSafeElements);
+  if (!Legal->isSafeForAnyVectorWidth())
+    this->MaxSafeElements = MaxSafeElements;
 
   LLVM_DEBUG(dbgs() << "LV: The max safe fixed VF is: " << MaxSafeFixedVF
                     << ".\n");
@@ -8691,8 +8700,8 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
       VPlanTransforms::optimize(*Plan);
       // TODO: try to put it close to addActiveLaneMask().
       // Discard the plan if it is not EVL-compatible
-      if (CM.foldTailWithEVL() &&
-          !VPlanTransforms::tryAddExplicitVectorLength(*Plan))
+      if (CM.foldTailWithEVL() && !VPlanTransforms::tryAddExplicitVectorLength(
+                                      *Plan, CM.getMaxSafeElements()))
         break;
       assert(verifyVPlanIsValid(*Plan) && "VPlan is invalid");
       VPlans.push_back(std::move(Plan));
