@@ -442,6 +442,7 @@ Bug Fixes in This Version
 - Fixed a crash using ``__array_rank`` on 64-bit targets. (#GH113044).
 - The warning emitted for an unsupported register variable type now points to
   the unsupported type instead of the ``register`` keyword (#GH109776).
+- Fixed a crash when emit ctor for global variant with flexible array init  (#GH113187).
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -543,6 +544,7 @@ Bug Fixes to C++ Support
 - Clang incorrectly considered a class with an anonymous union member to not be
   const-default-constructible even if a union member has a default member initializer.
   (#GH95854).
+- Fixed an assertion failure when evaluating an invalid expression in an array initializer (#GH112140)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -709,6 +711,7 @@ clang-format
   multi-line comments without touching their contents, renames ``false`` to
   ``Never``, and ``true`` to ``Always``.
 - Adds ``RemoveEmptyLinesInUnwrappedLines`` option.
+- Adds ``KeepFormFeed`` option and set it to ``true`` for ``GNU`` style.
 
 libclang
 --------
