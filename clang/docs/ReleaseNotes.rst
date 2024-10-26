@@ -133,6 +133,15 @@ C++ Specific Potentially Breaking Changes
     // Fixed version:
     unsigned operator""_udl_name(unsigned long long);
 
+- Clang will now produce an error diagnostic when [[clang::lifetimebound]] is
+  applied on a parameter of a function that returns void. This was previously 
+  ignored and had no effect. (#GH107556)
+
+  .. code-block:: c++
+
+    // Now diagnoses with an error.
+    void f(int& i [[clang::lifetimebound]]);
+
 ABI Changes in This Version
 ---------------------------
 
@@ -680,6 +689,15 @@ NetBSD Support
 
 WebAssembly Support
 ^^^^^^^^^^^^^^^^^^^
+
+The default target CPU, "generic", now enables the `-mnontrapping-fptoint`
+and `-mbulk-memory` flags, which correspond to the [Bulk Memory Operations]
+and [Non-trapping float-to-int Conversions] language features, which are
+[widely implemented in engines].
+
+[Bulk Memory Operations]: https://github.com/WebAssembly/bulk-memory-operations/blob/master/proposals/bulk-memory-operations/Overview.md
+[Non-trapping float-to-int Conversions]: https://github.com/WebAssembly/spec/blob/master/proposals/nontrapping-float-to-int-conversion/Overview.md
+[widely implemented in engines]: https://webassembly.org/features/
 
 AVR Support
 ^^^^^^^^^^^
