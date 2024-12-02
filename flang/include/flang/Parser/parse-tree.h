@@ -1024,10 +1024,18 @@ struct Initialization {
 
 // R739 component-decl ->
 //        component-name [( component-array-spec )]
-//        [lbracket coarray-spec rbracket] [* char-length]
-//        [component-initialization]
+//          [lbracket coarray-spec rbracket] [* char-length]
+//          [component-initialization] |
+//        component-name *char-length [( component-array-spec )]
+//          [lbracket coarray-spec rbracket] [component-initialization]
 struct ComponentDecl {
   TUPLE_CLASS_BOILERPLATE(ComponentDecl);
+  ComponentDecl(Name &&name, CharLength &&length,
+      std::optional<ComponentArraySpec> &&aSpec,
+      std::optional<CoarraySpec> &&coaSpec,
+      std::optional<Initialization> &&init)
+      : t{std::move(name), std::move(aSpec), std::move(coaSpec),
+            std::move(length), std::move(init)} {}
   std::tuple<Name, std::optional<ComponentArraySpec>,
       std::optional<CoarraySpec>, std::optional<CharLength>,
       std::optional<Initialization>>
@@ -1381,9 +1389,16 @@ struct AttrSpec {
 // R803 entity-decl ->
 //        object-name [( array-spec )] [lbracket coarray-spec rbracket]
 //          [* char-length] [initialization] |
-//        function-name [* char-length]
+//        function-name [* char-length] |
+// (ext.) object-name *char-length [( array-spec )]
+//          [lbracket coarray-spec rbracket] [initialization]
 struct EntityDecl {
   TUPLE_CLASS_BOILERPLATE(EntityDecl);
+  EntityDecl(ObjectName &&name, CharLength &&length,
+      std::optional<ArraySpec> &&aSpec, std::optional<CoarraySpec> &&coaSpec,
+      std::optional<Initialization> &&init)
+      : t{std::move(name), std::move(aSpec), std::move(coaSpec),
+            std::move(length), std::move(init)} {}
   std::tuple<ObjectName, std::optional<ArraySpec>, std::optional<CoarraySpec>,
       std::optional<CharLength>, std::optional<Initialization>>
       t;
@@ -3457,6 +3472,14 @@ inline namespace modifier {
 //   ENUM_CLASS(Value, Keyword1, Keyword2);
 // };
 
+// Ref: [4.5:72-81], [5.0:110-119], [5.1:134-143], [5.2:169-170]
+//
+// alignment ->
+//    scalar-integer-expression                     // since 4.5
+struct OmpAlignment {
+  WRAPPER_CLASS_BOILERPLATE(OmpAlignment, ScalarIntExpr);
+};
+
 // Ref: [5.1:184-185], [5.2:178-179]
 //
 // align-modifier ->
@@ -3524,6 +3547,15 @@ struct OmpIteratorSpecifier {
 struct OmpDependenceType {
   ENUM_CLASS(Value, Sink, Source);
   WRAPPER_CLASS_BOILERPLATE(OmpDependenceType, Value);
+};
+
+// Ref: [5.0:170-176], [5.1:197-205], [5.2:276-277]
+//
+// device-modifier ->
+//    ANCESTOR | DEVICE_NUM                         // since 5.0
+struct OmpDeviceModifier {
+  ENUM_CLASS(Value, Ancestor, Device_Num)
+  WRAPPER_CLASS_BOILERPLATE(OmpDeviceModifier, Value);
 };
 
 // Ref: [5.1:205-209], [5.2:166-168]
@@ -3656,18 +3688,26 @@ struct OmpVariableCategory {
 
 // --- Clauses
 
-// OMP 5.0 2.10.1 affinity([aff-modifier:] locator-list)
-//                aff-modifier: interator-modifier
+// Ref: [5.0:135-140], [5.1:161-166], [5.2:264-265]
+//
+// affinity-clause ->
+//    AFFINITY([aff-modifier:] locator-list)        // since 5.0
+// aff-modifier ->
+//    interator-modifier                            // since 5.0
 struct OmpAffinityClause {
   TUPLE_CLASS_BOILERPLATE(OmpAffinityClause);
-  std::tuple<std::optional<OmpIterator>, OmpObjectList> t;
+  MODIFIER_BOILERPLATE(OmpIterator);
+  std::tuple<MODIFIERS(), OmpObjectList> t;
 };
 
-// 2.8.1 aligned-clause -> ALIGNED (variable-name-list[ : scalar-constant])
+// Ref: [4.5:72-81], [5.0:110-119], [5.1:134-143], [5.2:169-170]
+//
+// aligned-clause ->
+//    ALIGNED(list [: alignment])                   // since 4.5
 struct OmpAlignedClause {
   TUPLE_CLASS_BOILERPLATE(OmpAlignedClause);
-  CharBlock source;
-  std::tuple<OmpObjectList, std::optional<ScalarIntConstantExpr>> t;
+  MODIFIER_BOILERPLATE(OmpAlignment);
+  std::tuple<OmpObjectList, MODIFIERS()> t;
 };
 
 // Ref: [5.0:158-159], [5.1:184-185], [5.2:178-179]
@@ -3806,8 +3846,8 @@ WRAPPER_CLASS(OmpDoacrossClause, OmpDoacross);
 // Ref: [5.0:254-255], [5.1:287-288], [5.2:73]
 //
 // destroy-clause ->
-//    DESTROY |             // since 5.0, until 5.2
-//    DESTROY(variable)     // since 5.2
+//    DESTROY |                                     // since 5.0, until 5.1
+//    DESTROY(variable)                             // since 5.2
 WRAPPER_CLASS(OmpDestroyClause, OmpObject);
 
 // Ref: [5.0:135-140], [5.1:161-166], [5.2:265-266]
@@ -3826,8 +3866,8 @@ struct OmpDetachClause {
 //        scalar-integer-expression)                // since 5.0
 struct OmpDeviceClause {
   TUPLE_CLASS_BOILERPLATE(OmpDeviceClause);
-  ENUM_CLASS(DeviceModifier, Ancestor, Device_Num)
-  std::tuple<std::optional<DeviceModifier>, ScalarIntExpr> t;
+  MODIFIER_BOILERPLATE(OmpDeviceModifier);
+  std::tuple<MODIFIERS(), ScalarIntExpr> t;
 };
 
 // Ref: [5.0:180-185], [5.1:210-216], [5.2:275]
