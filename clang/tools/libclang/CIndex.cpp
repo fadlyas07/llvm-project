@@ -2921,6 +2921,10 @@ void OpenACCClauseEnqueue::VisitAutoClause(const OpenACCAutoClause &C) {}
 void OpenACCClauseEnqueue::VisitIndependentClause(
     const OpenACCIndependentClause &C) {}
 void OpenACCClauseEnqueue::VisitSeqClause(const OpenACCSeqClause &C) {}
+void OpenACCClauseEnqueue::VisitFinalizeClause(const OpenACCFinalizeClause &C) {
+}
+void OpenACCClauseEnqueue::VisitIfPresentClause(
+    const OpenACCIfPresentClause &C) {}
 void OpenACCClauseEnqueue::VisitCollapseClause(const OpenACCCollapseClause &C) {
   Visitor.AddStmt(C.getLoopCount());
 }
