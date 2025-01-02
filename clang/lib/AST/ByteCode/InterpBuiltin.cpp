@@ -1544,9 +1544,10 @@ static bool interp__builtin_constant_p(InterpState &S, CodePtr OpPC,
     if (Res.isInvalid()) {
       C.cleanup();
       Stk.clear();
+      return returnInt(false);
     }
 
-    if (!Res.isInvalid() && !Res.empty()) {
+    if (!Res.empty()) {
       const APValue &LV = Res.toAPValue();
       if (LV.isLValue()) {
         APValue::LValueBase Base = LV.getLValueBase();
@@ -1871,7 +1872,9 @@ static bool interp__builtin_memcpy(InterpState &S, CodePtr OpPC,
   size_t RemainingDestElems;
   if (DestPtr.getFieldDesc()->isArray()) {
     DestElemType = DestPtr.getFieldDesc()->getElemQualType();
-    RemainingDestElems = (DestPtr.getNumElems() - DestPtr.getIndex());
+    RemainingDestElems = DestPtr.isUnknownSizeArray()
+                             ? 0
+                             : (DestPtr.getNumElems() - DestPtr.getIndex());
   } else {
     DestElemType = DestPtr.getType();
     RemainingDestElems = 1;
@@ -1890,7 +1893,9 @@ static bool interp__builtin_memcpy(InterpState &S, CodePtr OpPC,
   size_t RemainingSrcElems;
   if (SrcPtr.getFieldDesc()->isArray()) {
     SrcElemType = SrcPtr.getFieldDesc()->getElemQualType();
-    RemainingSrcElems = (SrcPtr.getNumElems() - SrcPtr.getIndex());
+    RemainingSrcElems = SrcPtr.isUnknownSizeArray()
+                            ? 0
+                            : (SrcPtr.getNumElems() - SrcPtr.getIndex());
   } else {
     SrcElemType = SrcPtr.getType();
     RemainingSrcElems = 1;
