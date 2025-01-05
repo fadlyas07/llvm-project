@@ -4,6 +4,7 @@
 // RUN: %clang_cc1 -std=c++17 -triple x86_64-unknown-unknown %s -verify=expected,since-cxx11,since-cxx17,cxx98-17 -fexceptions -fcxx-exceptions -pedantic-errors
 // RUN: %clang_cc1 -std=c++20 -triple x86_64-unknown-unknown %s -verify=expected,since-cxx11,since-cxx17 -fexceptions -fcxx-exceptions -pedantic-errors
 // RUN: %clang_cc1 -std=c++23 -triple x86_64-unknown-unknown %s -verify=expected,since-cxx11,since-cxx17 -fexceptions -fcxx-exceptions -pedantic-errors
+// RUN: %clang_cc1 -std=c++2c -triple x86_64-unknown-unknown %s -verify=expected,since-cxx11,since-cxx17 -fexceptions -fcxx-exceptions -pedantic-errors
 
 #if __cplusplus == 199711L
 #define static_assert(...) __extension__ _Static_assert(__VA_ARGS__)
@@ -922,6 +923,7 @@ namespace cwg155 { // cwg155: dup 632
   // expected-warning@-1 {{braces around scalar initializer}}
 }
 
+// cwg156: sup 1111
 // cwg158 is in cwg158.cpp
 
 namespace cwg159 { // cwg159: 3.5
@@ -1363,6 +1365,14 @@ namespace cwg191 { // cwg191: yes
     };
   }
 }
+
+namespace cwg192 { // cwg192: 2.7
+struct S {
+  void f(I i) { }
+  // expected-error@-1 {{unknown type name 'I'}}
+  typedef int I;
+};
+} // namespace cwg192
 
 // cwg193 is in cwg193.cpp
 
