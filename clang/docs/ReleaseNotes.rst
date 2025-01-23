@@ -1135,6 +1135,20 @@ Windows Support
 LoongArch Support
 ^^^^^^^^^^^^^^^^^
 
+- Types of parameters and return value of ``__builtin_lsx_vorn_v`` and ``__builtin_lasx_xvorn_v``
+  are changed from ``signed char`` to ``unsigned char``. (#GH114514)
+
+- ``-mrelax`` and ``-mno-relax`` are supported now on LoongArch that can be used
+  to enable / disable the linker relaxation optimization. (#GH123587)
+
+- Fine-grained la64v1.1 options are added including ``-m{no-,}frecipe``, ``-m{no-,}lam-bh``,
+  ``-m{no-,}ld-seq-sa``, ``-m{no-,}div32``, ``-m{no-,}lamcas`` and ``-m{no-,}scq``.
+
+- Two options ``-m{no-,}annotate-tablejump`` are added to enable / disable
+  annotating table jump instruction to correlate it with the jump table. (#GH102411)
+
+- FreeBSD support is added for LoongArch64 and has been tested by building kernel-toolchain. (#GH119191)
+
 RISC-V Support
 ^^^^^^^^^^^^^^
 
@@ -1257,6 +1271,13 @@ libclang
   of a class.
 - Added ``clang_getOffsetOfBase``, which allows computing the offset of a base
   class in a class's layout.
+
+
+Code Completion
+---------------
+
+- Use ``HeuristicResolver`` (upstreamed from clangd) to improve code completion results
+  in dependent code
 
 Static Analyzer
 ---------------
