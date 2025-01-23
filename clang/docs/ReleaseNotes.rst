@@ -363,6 +363,9 @@ Resolutions to C++ Defect Reports
 - Clang now allows trailing requires clause on explicit deduction guides.
   (`CWG2707: Deduction guides cannot have a trailing requires-clause <https://cplusplus.github.io/CWG/issues/2707.html>`_).
 
+- Respect constructor constraints during CTAD.
+  (`CWG2628: Implicit deduction guides should propagate constraints <https://cplusplus.github.io/CWG/issues/2628.html>`_).
+
 - Clang now diagnoses a space in the first production of a ``literal-operator-id``
   by default.
   (`CWG2521: User-defined literals and reserved identifiers <https://cplusplus.github.io/CWG/issues/2521.html>`_).
@@ -971,6 +974,7 @@ Bug Fixes to C++ Support
 - Fixed canonicalization of pack indexing types - Clang did not always recognized identical pack indexing. (#GH123033)
 - Fixed a nested lambda substitution issue for constraint evaluation. (#GH123441)
 - Fixed various false diagnostics related to the use of immediate functions. (#GH123472)
+- Fix immediate escalation not propagating through inherited constructors.  (#GH112677)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
