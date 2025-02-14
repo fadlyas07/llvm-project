@@ -1,0 +1,9 @@
+header: subdir/test.h
+header_template: test.h.def
+functions:
+  - name: func
+    return_type: type_a
+    arguments:
+      - type: type_b
+    standards:
+      - stdc
