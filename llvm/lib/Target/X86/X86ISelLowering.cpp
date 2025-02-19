@@ -736,9 +736,6 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
     setOperationAction(ISD::STRICT_FP_EXTEND, MVT::f32, Custom);
     setOperationAction(ISD::STRICT_FP_EXTEND, MVT::f64, Custom);
 
-    setLibcallName(RTLIB::FPROUND_F32_F16, "__truncsfhf2");
-    setLibcallName(RTLIB::FPEXT_F16_F32, "__extendhfsf2");
-
     // Lower this to MOVMSK plus an AND.
     setOperationAction(ISD::FGETSIGN, MVT::i64, Custom);
     setOperationAction(ISD::FGETSIGN, MVT::i32, Custom);
@@ -6112,6 +6109,19 @@ static bool getFauxShuffleMask(SDValue N, const APInt &DemandedElts,
     Ops.push_back(N0);
     Ops.push_back(N1);
     return true;
+  }
+  case ISD::CONCAT_VECTORS: {
+    // Limit this to vXi64 vector cases to make the most of cross lane shuffles.
+    unsigned NumSubElts = N.getOperand(0).getValueType().getVectorNumElements();
+    if (NumBitsPerElt == 64) {
+      for (unsigned I = 0, E = N.getNumOperands(); I != E; ++I) {
+        for (unsigned M = 0; M != NumSubElts; ++M)
+          Mask.push_back((I * NumElts) + M);
+        Ops.push_back(N.getOperand(I));
+      }
+      return true;
+    }
+    return false;
   }
   case ISD::INSERT_SUBVECTOR: {
     SDValue Src = N.getOperand(0);
