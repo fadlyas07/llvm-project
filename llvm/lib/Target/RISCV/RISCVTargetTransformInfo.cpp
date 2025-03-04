@@ -395,17 +395,17 @@ costShuffleViaVRegSplitting(RISCVTTIImpl &TTI, MVT LegalVT,
                             std::optional<unsigned> VLen, VectorType *Tp,
                             ArrayRef<int> Mask, TTI::TargetCostKind CostKind) {
   assert(LegalVT.isFixedLengthVector());
-  InstructionCost NumOfDests = InstructionCost::getInvalid();
-  if (VLen && !Mask.empty()) {
-    MVT ElemVT = LegalVT.getVectorElementType();
-    unsigned ElemsPerVReg = *VLen / ElemVT.getFixedSizeInBits();
-    LegalVT = TTI.getTypeLegalizationCost(
-                     FixedVectorType::get(Tp->getElementType(), ElemsPerVReg))
-                  .second;
-    // Number of destination vectors after legalization:
-    NumOfDests = divideCeil(Mask.size(), LegalVT.getVectorNumElements());
-  }
-  if (!NumOfDests.isValid() || NumOfDests <= 1 ||
+  if (!VLen || Mask.empty())
+    return InstructionCost::getInvalid();
+  MVT ElemVT = LegalVT.getVectorElementType();
+  unsigned ElemsPerVReg = *VLen / ElemVT.getFixedSizeInBits();
+  LegalVT = TTI.getTypeLegalizationCost(
+                   FixedVectorType::get(Tp->getElementType(), ElemsPerVReg))
+                .second;
+  // Number of destination vectors after legalization:
+  InstructionCost NumOfDests =
+      divideCeil(Mask.size(), LegalVT.getVectorNumElements());
+  if (NumOfDests <= 1 ||
       LegalVT.getVectorElementType().getSizeInBits() !=
           Tp->getElementType()->getPrimitiveSizeInBits() ||
       LegalVT.getVectorNumElements() >= Tp->getElementCount().getFixedValue())
@@ -721,11 +721,9 @@ InstructionCost RISCVTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
     // TODO: Extend for scalable subvector types
     if (std::pair<InstructionCost, MVT> SubLT = getTypeLegalizationCost(SubTp);
         SubLT.second.isValid() && SubLT.second.isFixedLengthVector()) {
-      const unsigned MinVLen = ST->getRealMinVLen();
-      const unsigned MaxVLen = ST->getRealMaxVLen();
-      if (MinVLen == MaxVLen &&
-          SubLT.second.getScalarSizeInBits() * Index % MinVLen == 0 &&
-          SubLT.second.getSizeInBits() <= MinVLen)
+      if (std::optional<unsigned> VLen = ST->getRealVLen();
+          VLen && SubLT.second.getScalarSizeInBits() * Index % *VLen == 0 &&
+          SubLT.second.getSizeInBits() <= *VLen)
         return TTI::TCC_Free;
     }
 
