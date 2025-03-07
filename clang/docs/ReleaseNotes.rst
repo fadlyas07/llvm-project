@@ -111,6 +111,9 @@ C Language Changes
 
 C2y Feature Support
 ^^^^^^^^^^^^^^^^^^^
+- Implemented N3411 which allows a source file to not end with a newline
+  character. This is still reported as a conforming extension in earlier
+  language modes.
 
 C23 Feature Support
 ^^^^^^^^^^^^^^^^^^^
@@ -248,6 +251,7 @@ Bug Fixes in This Version
 
 - Clang now outputs correct values when #embed data contains bytes with negative
   signed char values (#GH102798).
+- Fixed a crash when merging named enumerations in modules (#GH114240).
 - Fixed rejects-valid problem when #embed appears in std::initializer_list or
   when it can affect template argument deduction (#GH122306).
 - Fix crash on code completion of function calls involving partial order of function templates
