@@ -39642,19 +39642,15 @@ static SDValue combineX86ShuffleChainWithExtract(
 /// into either a single instruction if there is a special purpose instruction
 /// for this operation, or into a PSHUFB instruction which is a fully general
 /// instruction but should only be used to replace chains over a certain depth.
-static SDValue combineX86ShuffleChain(ArrayRef<SDValue> Inputs, SDValue Root,
-                                      ArrayRef<int> BaseMask, int Depth,
-                                      ArrayRef<const SDNode *> SrcNodes,
-                                      bool AllowVariableCrossLaneMask,
-                                      bool AllowVariablePerLaneMask,
-                                      bool IsMaskedShuffle,
-                                      SelectionDAG &DAG,
-                                      const X86Subtarget &Subtarget) {
+static SDValue combineX86ShuffleChain(
+    ArrayRef<SDValue> Inputs, SDValue Root, ArrayRef<int> BaseMask, int Depth,
+    ArrayRef<const SDNode *> SrcNodes, bool AllowVariableCrossLaneMask,
+    bool AllowVariablePerLaneMask, bool IsMaskedShuffle, SelectionDAG &DAG,
+    const SDLoc &DL, const X86Subtarget &Subtarget) {
   assert(!BaseMask.empty() && "Cannot combine an empty shuffle mask!");
   assert((Inputs.size() == 1 || Inputs.size() == 2) &&
          "Unexpected number of shuffle inputs!");
 
-  SDLoc DL(Root);
   unsigned RootOpc = Root.getOpcode();
   MVT RootVT = Root.getSimpleValueType();
   unsigned RootSizeInBits = RootVT.getSizeInBits();
@@ -40525,7 +40521,7 @@ static SDValue combineX86ShuffleChainWithExtract(
   if (SDValue WideShuffle = combineX86ShuffleChain(
           WideInputs, WideRoot, WideMask, Depth, SrcNodes,
           AllowVariableCrossLaneMask, AllowVariablePerLaneMask, IsMaskedShuffle,
-          DAG, Subtarget)) {
+          DAG, SDLoc(WideRoot), Subtarget)) {
     WideShuffle =
         extractSubVector(WideShuffle, 0, DAG, SDLoc(Root), RootSizeInBits);
     return DAG.getBitcast(RootVT, WideShuffle);
@@ -40874,7 +40870,7 @@ static SDValue combineX86ShufflesRecursively(
     ArrayRef<SDValue> SrcOps, int SrcOpIndex, SDValue Root,
     ArrayRef<int> RootMask, ArrayRef<const SDNode *> SrcNodes, unsigned Depth,
     unsigned MaxDepth, bool AllowVariableCrossLaneMask,
-    bool AllowVariablePerLaneMask, SelectionDAG &DAG,
+    bool AllowVariablePerLaneMask, SelectionDAG &DAG, const SDLoc &DL,
     const X86Subtarget &Subtarget) {
   assert(!RootMask.empty() &&
          (RootMask.size() > 1 || (RootMask[0] == 0 && SrcOpIndex == 0)) &&
@@ -40882,7 +40878,6 @@ static SDValue combineX86ShufflesRecursively(
   MVT RootVT = Root.getSimpleValueType();
   assert(RootVT.isVector() && "Shuffles operate on vector types!");
   unsigned RootSizeInBits = RootVT.getSizeInBits();
-  SDLoc DL(Root);
 
   // Bound the depth of our recursive combine because this is ultimately
   // quadratic in nature.
@@ -41176,7 +41171,7 @@ static SDValue combineX86ShufflesRecursively(
       }
       if (SDValue Res = combineX86ShufflesRecursively(
               Ops, i, Root, ResolvedMask, CombinedNodes, Depth + 1, MaxDepth,
-              AllowCrossLaneVar, AllowPerLaneVar, DAG, Subtarget))
+              AllowCrossLaneVar, AllowPerLaneVar, DAG, DL, Subtarget))
         return Res;
     }
   }
@@ -41296,7 +41291,7 @@ static SDValue combineX86ShufflesRecursively(
     // Try to combine into a single shuffle instruction.
     if (SDValue Shuffle = combineX86ShuffleChain(
             Ops, Root, Mask, Depth, CombinedNodes, AllowVariableCrossLaneMask,
-            AllowVariablePerLaneMask, IsMaskedShuffle, DAG, Subtarget))
+            AllowVariablePerLaneMask, IsMaskedShuffle, DAG, DL, Subtarget))
       return Shuffle;
 
     // If all the operands come from the same larger vector, fallthrough and try
@@ -41324,7 +41319,7 @@ static SDValue combineX86ShufflesRecursively(SDValue Op, SelectionDAG &DAG,
   return combineX86ShufflesRecursively(
       {Op}, 0, Op, {0}, {}, /*Depth*/ 0, X86::MaxShuffleCombineDepth,
       /*AllowCrossLaneVarMask*/ true, /*AllowPerLaneVarMask*/ true, DAG,
-      Subtarget);
+      SDLoc(Op), Subtarget);
 }
 
 /// Get the PSHUF-style mask from PSHUF node.
@@ -41920,7 +41915,6 @@ static SDValue canonicalizeLaneShuffleWithRepeatedOps(SDValue V,
 
 static SDValue combineConcatVectorOps(const SDLoc &DL, MVT VT,
                                       ArrayRef<SDValue> Ops, SelectionDAG &DAG,
-                                      TargetLowering::DAGCombinerInfo &DCI,
                                       const X86Subtarget &Subtarget,
                                       unsigned Depth = 0);
 
@@ -41978,7 +41972,7 @@ static SDValue combineTargetShuffle(SDValue N, const SDLoc &DL,
               {BC}, 0, BC, DemandedMask, {}, /*Depth*/ 0,
               X86::MaxShuffleCombineDepth,
               /*AllowCrossLaneVarMask*/ true,
-              /*AllowPerLaneVarMask*/ true, DAG, Subtarget))
+              /*AllowPerLaneVarMask*/ true, DAG, DL, Subtarget))
         return DAG.getNode(X86ISD::VBROADCAST, DL, VT,
                            DAG.getBitcast(SrcVT, Res));
     }
@@ -42669,7 +42663,7 @@ static SDValue combineTargetShuffle(SDValue N, const SDLoc &DL,
     if (CanConcat) {
       SDValue Ops[] = {N.getOperand(0), N.getOperand(2)};
       if (SDValue ConcatSrc =
-              combineConcatVectorOps(DL, WideVT, Ops, DAG, DCI, Subtarget)) {
+              combineConcatVectorOps(DL, WideVT, Ops, DAG, Subtarget)) {
         SDValue Mask = widenSubVector(N.getOperand(1), false, Subtarget, DAG,
                                       DL, WideVT.getSizeInBits());
         SDValue Perm = DAG.getNode(X86ISD::VPERMV, DL, WideVT, Mask, ConcatSrc);
@@ -42684,7 +42678,7 @@ static SDValue combineTargetShuffle(SDValue N, const SDLoc &DL,
       // See if we can concatenate the commuted operands.
       if (CanConcat) {
         if (SDValue ConcatSrc = combineConcatVectorOps(
-                DL, WideVT, {N.getOperand(2), N.getOperand(0)}, DAG, DCI,
+                DL, WideVT, {N.getOperand(2), N.getOperand(0)}, DAG,
                 Subtarget)) {
           ShuffleVectorSDNode::commuteMask(Mask);
           Mask.append(NumElts, SM_SentinelUndef);
@@ -42714,7 +42708,7 @@ static SDValue combineTargetShuffle(SDValue N, const SDLoc &DL,
                    m_InsertSubvector(m_Undef(), m_Value(Ops[1]), m_Zero())) &&
           Ops[0].getValueType() == HalfVT && Ops[1].getValueType() == HalfVT) {
         if (SDValue ConcatSrc =
-                combineConcatVectorOps(DL, VT, Ops, DAG, DCI, Subtarget)) {
+                combineConcatVectorOps(DL, VT, Ops, DAG, Subtarget)) {
           for (int &M : Mask)
             M = (M < (int)NumElts ? M : (M - (NumElts / 2)));
           return lowerShuffleWithPERMV(DL, VT, Mask, ConcatSrc,
@@ -43981,7 +43975,7 @@ bool X86TargetLowering::SimplifyDemandedVectorEltsForTargetNode(
     SDValue NewShuffle = combineX86ShufflesRecursively(
         {Op}, 0, Op, DemandedMask, {}, 0, X86::MaxShuffleCombineDepth - Depth,
         /*AllowCrossLaneVarMask*/ true, /*AllowPerLaneVarMask*/ true, TLO.DAG,
-        Subtarget);
+        SDLoc(Op), Subtarget);
     if (NewShuffle)
       return TLO.CombineTo(Op, NewShuffle);
   }
@@ -51581,7 +51575,7 @@ static SDValue combineAnd(SDNode *N, SelectionDAG &DAG,
               {SrcVec}, 0, SrcVec, ShuffleMask, {}, /*Depth*/ 1,
               X86::MaxShuffleCombineDepth,
               /*AllowVarCrossLaneMask*/ true,
-              /*AllowVarPerLaneMask*/ true, DAG, Subtarget))
+              /*AllowVarPerLaneMask*/ true, DAG, SDLoc(SrcVec), Subtarget))
         return DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, VT, Shuffle,
                            N0.getOperand(1));
     }
@@ -57822,7 +57816,6 @@ CastIntSETCCtoFP(MVT VT, ISD::CondCode CC, unsigned NumSignificantBitsLHS,
 /// ISD::INSERT_SUBVECTOR). The ops are assumed to be of the same type.
 static SDValue combineConcatVectorOps(const SDLoc &DL, MVT VT,
                                       ArrayRef<SDValue> Ops, SelectionDAG &DAG,
-                                      TargetLowering::DAGCombinerInfo &DCI,
                                       const X86Subtarget &Subtarget,
                                       unsigned Depth) {
   assert(Subtarget.hasAVX() && "AVX assumed for concat_vectors");
@@ -57980,8 +57973,7 @@ static SDValue combineConcatVectorOps(const SDLoc &DL, MVT VT,
       }
       if (AllConstants)
         return DAG.getNode(ISD::CONCAT_VECTORS, DL, VT, Subs);
-      return combineConcatVectorOps(DL, VT, Subs, DAG, DCI, Subtarget,
-                                    Depth + 1);
+      return combineConcatVectorOps(DL, VT, Subs, DAG, Subtarget, Depth + 1);
     };
 
     switch (Op0.getOpcode()) {
@@ -58663,7 +58655,7 @@ static SDValue combineCONCAT_VECTORS(SDNode *N, SelectionDAG &DAG,
 
   if (Subtarget.hasAVX() && TLI.isTypeLegal(VT) && TLI.isTypeLegal(SrcVT)) {
     if (SDValue R = combineConcatVectorOps(SDLoc(N), VT.getSimpleVT(), Ops, DAG,
-                                           DCI, Subtarget))
+                                           Subtarget))
       return R;
   }
 
@@ -58765,7 +58757,7 @@ static SDValue combineINSERT_SUBVECTOR(SDNode *N, SelectionDAG &DAG,
   SmallVector<SDValue, 2> SubVectorOps;
   if (collectConcatOps(N, SubVectorOps, DAG)) {
     if (SDValue Fold =
-            combineConcatVectorOps(dl, OpVT, SubVectorOps, DAG, DCI, Subtarget))
+            combineConcatVectorOps(dl, OpVT, SubVectorOps, DAG, Subtarget))
       return Fold;
 
     // If we're inserting all zeros into the upper half, change this to
