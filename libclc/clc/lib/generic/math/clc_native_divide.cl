@@ -6,8 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define __CLC_FUNCTION __clc_tanpi
-#define __CLC_BODY <clc/math/unary_decl.inc>
+#include <clc/internal/clc.h>
+
+#define __FLOAT_ONLY
+#define __CLC_BODY <clc_native_divide.inc>
+
 #include <clc/math/gentype.inc>
-#undef __CLC_BODY
-#undef __CLC_FUNCTION
