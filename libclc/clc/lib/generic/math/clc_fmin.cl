@@ -7,19 +7,16 @@
 //===----------------------------------------------------------------------===//
 
 #include <clc/clcmacro.h>
-#include <clc/utils.h>
+#include <clc/internal/clc.h>
+#include <clc/relational/clc_isnan.h>
 
-#ifndef __CLC_BUILTIN
-#define __CLC_BUILTIN __CLC_XCONCAT(__clc_, __CLC_FUNCTION)
-#endif
-
-_CLC_DEFINE_UNARY_BUILTIN(float, __CLC_FUNCTION, __CLC_BUILTIN, float)
+_CLC_DEFINE_BINARY_BUILTIN(float, __clc_fmin, __builtin_fminf, float, float);
 
 #ifdef cl_khr_fp64
 
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
 
-_CLC_DEFINE_UNARY_BUILTIN(double, __CLC_FUNCTION, __CLC_BUILTIN, double)
+_CLC_DEFINE_BINARY_BUILTIN(double, __clc_fmin, __builtin_fmin, double, double);
 
 #endif
 
@@ -27,6 +24,13 @@ _CLC_DEFINE_UNARY_BUILTIN(double, __CLC_FUNCTION, __CLC_BUILTIN, double)
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-_CLC_DEFINE_UNARY_BUILTIN(half, __CLC_FUNCTION, __CLC_BUILTIN, half)
+_CLC_DEF _CLC_OVERLOAD half __clc_fmin(half x, half y) {
+  if (__clc_isnan(x))
+    return y;
+  if (__clc_isnan(y))
+    return x;
+  return (y < x) ? y : x;
+}
+_CLC_BINARY_VECTORIZE(_CLC_OVERLOAD _CLC_DEF, half, __clc_fmin, half, half)
 
 #endif
