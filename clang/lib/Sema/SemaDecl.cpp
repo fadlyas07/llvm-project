@@ -59,8 +59,10 @@
 #include "clang/Sema/SemaWasm.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/STLForwardCompat.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/TargetParser/Triple.h"
 #include <algorithm>
@@ -422,8 +424,9 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
     if (CorrectedII) {
       TypeNameValidatorCCC CCC(/*AllowInvalid=*/true, isClassName,
                                AllowDeducedTemplate);
-      TypoCorrection Correction = CorrectTypo(Result.getLookupNameInfo(), Kind,
-                                              S, SS, CCC, CTK_ErrorRecovery);
+      TypoCorrection Correction =
+          CorrectTypo(Result.getLookupNameInfo(), Kind, S, SS, CCC,
+                      CorrectTypoKind::ErrorRecovery);
       IdentifierInfo *NewII = Correction.getCorrectionAsIdentifierInfo();
       TemplateTy Template;
       bool MemberOfUnknownSpecialization;
@@ -711,7 +714,7 @@ void Sema::DiagnoseUnknownTypeName(IdentifierInfo *&II,
                            /*AllowNonTemplates=*/!IsTemplateName);
   if (TypoCorrection Corrected =
           CorrectTypo(DeclarationNameInfo(II, IILoc), LookupOrdinaryName, S, SS,
-                      CCC, CTK_ErrorRecovery)) {
+                      CCC, CorrectTypoKind::ErrorRecovery)) {
     // FIXME: Support error recovery for the template-name case.
     bool CanRecover = !IsTemplateName;
     if (Corrected.isKeyword()) {
@@ -979,7 +982,7 @@ Corrected:
       SecondTry = true;
       if (TypoCorrection Corrected =
               CorrectTypo(Result.getLookupNameInfo(), Result.getLookupKind(), S,
-                          &SS, *CCC, CTK_ErrorRecovery)) {
+                          &SS, *CCC, CorrectTypoKind::ErrorRecovery)) {
         unsigned UnqualifiedDiag = diag::err_undeclared_var_use_suggest;
         unsigned QualifiedDiag = diag::err_no_member_suggest;
 
@@ -9174,7 +9177,8 @@ static NamedDecl *DiagnoseInvalidRedeclaration(
   // If the qualified name lookup yielded nothing, try typo correction
   } else if ((Correction = SemaRef.CorrectTypo(
                   Prev.getLookupNameInfo(), Prev.getLookupKind(), S,
-                  &ExtraArgs.D.getCXXScopeSpec(), CCC, Sema::CTK_ErrorRecovery,
+                  &ExtraArgs.D.getCXXScopeSpec(), CCC,
+                  CorrectTypoKind::ErrorRecovery,
                   IsLocalFriend ? nullptr : NewDC))) {
     // Set up everything for the call to ActOnFunctionDeclarator
     ExtraArgs.D.SetIdentifier(Correction.getCorrectionAsIdentifierInfo(),
@@ -10421,6 +10425,15 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
   // Finally, we know we have the right number of parameters, install them.
   NewFD->setParams(Params);
+
+  // If this declarator is a declaration and not a definition, its parameters
+  // will not be pushed onto a scope chain. That means we will not issue any
+  // reserved identifier warnings for the declaration, but we will for the
+  // definition. Handle those here.
+  if (!D.isFunctionDefinition()) {
+    for (const ParmVarDecl *PVD : Params)
+      warnOnReservedIdentifier(PVD);
+  }
 
   if (D.getDeclSpec().isNoreturnSpecified())
     NewFD->addAttr(
@@ -12030,15 +12043,15 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
       MayNeedOverloadableChecks = true;
       switch (CheckOverload(S, NewFD, Previous, OldDecl,
                             /*NewIsUsingDecl*/ false)) {
-      case Ovl_Match:
+      case OverloadKind::Match:
         Redeclaration = true;
         break;
 
-      case Ovl_NonFunction:
+      case OverloadKind::NonFunction:
         Redeclaration = true;
         break;
 
-      case Ovl_Overload:
+      case OverloadKind::Overload:
         Redeclaration = false;
         break;
       }
@@ -13711,14 +13724,16 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
       return;
     }
 
-    if (VDecl->hasLocalStorage())
-      setFunctionHasBranchProtectedScope();
-
     if (DiagnoseUnexpandedParameterPack(Init, UPPC_Initializer)) {
       VDecl->setInvalidDecl();
       return;
     }
   }
+
+  // If the variable has an initializer and local storage, check whether
+  // anything jumps over the initialization.
+  if (VDecl->hasLocalStorage())
+    setFunctionHasBranchProtectedScope();
 
   // OpenCL 1.1 6.5.2: "Variables allocated in the __local address space inside
   // a kernel function cannot be initialized."
@@ -16759,7 +16774,7 @@ NamedDecl *Sema::ImplicitlyDefineFunction(SourceLocation Loc,
       (Diags.getDiagnosticLevel(diag_id, Loc) >= DiagnosticsEngine::Error)) {
     DeclFilterCCC<FunctionDecl> CCC{};
     Corrected = CorrectTypo(DeclarationNameInfo(&II, Loc), LookupOrdinaryName,
-                            S, nullptr, CCC, CTK_NonError);
+                            S, nullptr, CCC, CorrectTypoKind::NonError);
   }
 
   Diag(Loc, diag_id) << &II;
@@ -18035,7 +18050,8 @@ Sema::ActOnTag(Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
               // ensure the decl passes the structural compatibility check in
               // C11 6.2.7/1 (or 6.1.2.6/1 in C89).
               NamedDecl *Hidden = nullptr;
-              if (SkipBody && !hasVisibleDefinition(Def, &Hidden)) {
+              if (SkipBody &&
+                  (!hasVisibleDefinition(Def, &Hidden) || getLangOpts().C23)) {
                 // There is a definition of this tag, but it is not visible. We
                 // explicitly make use of C++'s one definition rule here, and
                 // assume that this definition is identical to the hidden one
@@ -18048,6 +18064,8 @@ Sema::ActOnTag(Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
                   SkipBody->CheckSameAsPrevious = true;
                   SkipBody->New = createTagFromNewDecl();
                   SkipBody->Previous = Def;
+
+                  ProcessDeclAttributeList(S, SkipBody->New, Attrs);
                   return Def;
                 } else {
                   SkipBody->ShouldSkip = true;
@@ -19842,9 +19860,8 @@ EnumConstantDecl *Sema::CheckEnumConstant(EnumDecl *Enum,
         // constant-expression in the enumerator-definition shall be a converted
         // constant expression of the underlying type.
         EltTy = Enum->getIntegerType();
-        ExprResult Converted =
-          CheckConvertedConstantExpression(Val, EltTy, EnumVal,
-                                           CCEK_Enumerator);
+        ExprResult Converted = CheckConvertedConstantExpression(
+            Val, EltTy, EnumVal, CCEKind::Enumerator);
         if (Converted.isInvalid())
           Val = nullptr;
         else
@@ -20032,7 +20049,8 @@ SkipBodyInfo Sema::shouldSkipAnonEnumBody(Scope *S, IdentifierInfo *II,
 Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
                               SourceLocation IdLoc, IdentifierInfo *Id,
                               const ParsedAttributesView &Attrs,
-                              SourceLocation EqualLoc, Expr *Val) {
+                              SourceLocation EqualLoc, Expr *Val,
+                              SkipBodyInfo *SkipBody) {
   EnumDecl *TheEnumDecl = cast<EnumDecl>(theEnumDecl);
   EnumConstantDecl *LastEnumConst =
     cast_or_null<EnumConstantDecl>(lastEnumConst);
@@ -20069,7 +20087,7 @@ Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
   if (!New)
     return nullptr;
 
-  if (PrevDecl) {
+  if (PrevDecl && (!SkipBody || !SkipBody->CheckSameAsPrevious)) {
     if (!TheEnumDecl->isScoped() && isa<ValueDecl>(PrevDecl)) {
       // Check for other kinds of shadowing not already handled.
       CheckShadow(New, PrevDecl, R);
