@@ -48,10 +48,9 @@ public:
 
   ~MipsELFObjectWriter() override = default;
 
-  unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
-                        const MCFixup &Fixup, bool IsPCRel) const override;
-  bool needsRelocateWithSymbol(const MCValue &Val, const MCSymbol &Sym,
-                               unsigned Type) const override;
+  unsigned getRelocType(const MCFixup &, const MCValue &,
+                        bool IsPCRel) const override;
+  bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const override;
   void sortRelocs(std::vector<ELFRelocationEntry> &Relocs) override;
 };
 
@@ -152,9 +151,8 @@ MipsELFObjectWriter::MipsELFObjectWriter(uint8_t OSABI,
                                          bool HasRelocationAddend, bool Is64)
     : MCELFObjectTargetWriter(Is64, OSABI, ELF::EM_MIPS, HasRelocationAddend) {}
 
-unsigned MipsELFObjectWriter::getRelocType(MCContext &Ctx,
+unsigned MipsELFObjectWriter::getRelocType(const MCFixup &Fixup,
                                            const MCValue &Target,
-                                           const MCFixup &Fixup,
                                            bool IsPCRel) const {
   // Determine the type of the relocation.
   unsigned Kind = Fixup.getTargetKind();
@@ -178,8 +176,7 @@ unsigned MipsELFObjectWriter::getRelocType(MCContext &Ctx,
   case FK_NONE:
     return ELF::R_MIPS_NONE;
   case FK_Data_1:
-    Ctx.reportError(Fixup.getLoc(),
-                    "MIPS does not support one byte relocations");
+    reportError(Fixup.getLoc(), "MIPS does not support one byte relocations");
     return ELF::R_MIPS_NONE;
   case Mips::fixup_Mips_16:
   case FK_Data_2:
@@ -341,7 +338,7 @@ unsigned MipsELFObjectWriter::getRelocType(MCContext &Ctx,
     return ELF::R_MICROMIPS_JALR;
   }
 
-  Ctx.reportError(Fixup.getLoc(), "unsupported relocation type");
+  reportError(Fixup.getLoc(), "unsupported relocation type");
   return ELF::R_MIPS_NONE;
 }
 
@@ -442,15 +439,14 @@ void MipsELFObjectWriter::sortRelocs(std::vector<ELFRelocationEntry> &Relocs) {
     Relocs[CopyTo++] = R.R;
 }
 
-bool MipsELFObjectWriter::needsRelocateWithSymbol(const MCValue &Val,
-                                                  const MCSymbol &Sym,
+bool MipsELFObjectWriter::needsRelocateWithSymbol(const MCValue &V,
                                                   unsigned Type) const {
   // If it's a compound relocation for N64 then we need the relocation if any
   // sub-relocation needs it.
   if (!isUInt<8>(Type))
-    return needsRelocateWithSymbol(Val, Sym, Type & 0xff) ||
-           needsRelocateWithSymbol(Val, Sym, (Type >> 8) & 0xff) ||
-           needsRelocateWithSymbol(Val, Sym, (Type >> 16) & 0xff);
+    return needsRelocateWithSymbol(V, Type & 0xff) ||
+           needsRelocateWithSymbol(V, (Type >> 8) & 0xff) ||
+           needsRelocateWithSymbol(V, (Type >> 16) & 0xff);
 
   switch (Type) {
   default:
@@ -483,7 +479,7 @@ bool MipsELFObjectWriter::needsRelocateWithSymbol(const MCValue &Val,
     // FIXME: It should be safe to return false for the STO_MIPS_MICROMIPS but
     //        we neglect to handle the adjustment to the LSB of the addend that
     //        it causes in applyFixup() and similar.
-    if (cast<MCSymbolELF>(Sym).getOther() & ELF::STO_MIPS_MICROMIPS)
+    if (cast<MCSymbolELF>(V.getAddSym())->getOther() & ELF::STO_MIPS_MICROMIPS)
       return true;
     return false;
 
@@ -494,7 +490,7 @@ bool MipsELFObjectWriter::needsRelocateWithSymbol(const MCValue &Val,
   case ELF::R_MIPS_16:
   case ELF::R_MIPS_32:
   case ELF::R_MIPS_GPREL32:
-    if (cast<MCSymbolELF>(Sym).getOther() & ELF::STO_MIPS_MICROMIPS)
+    if (cast<MCSymbolELF>(V.getAddSym())->getOther() & ELF::STO_MIPS_MICROMIPS)
       return true;
     [[fallthrough]];
   case ELF::R_MIPS_26:

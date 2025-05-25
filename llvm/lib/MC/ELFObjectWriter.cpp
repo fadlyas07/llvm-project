@@ -1182,6 +1182,11 @@ void ELFObjectWriter::reset() {
   MCObjectWriter::reset();
 }
 
+void ELFObjectWriter::setAssembler(MCAssembler *Asm) {
+  MCObjectWriter::setAssembler(Asm);
+  TargetObjectWriter->setAssembler(Asm);
+}
+
 bool ELFObjectWriter::hasRelocationAddend() const {
   return TargetObjectWriter->hasRelocationAddend();
 }
@@ -1293,25 +1298,18 @@ bool ELFObjectWriter::useSectionSymbol(const MCValue &Val,
       return false;
   }
 
-  // If the symbol is a thumb function the final relocation must set the lowest
-  // bit. With a symbol that is done by just having the symbol have that bit
-  // set, so we would lose the bit if we relocated with the section.
-  // FIXME: We could use the section but add the bit to the relocation value.
-  if (EMachine == ELF::EM_ARM && Asm->isThumbFunc(Sym))
-    return false;
-
-  return !TargetObjectWriter->needsRelocateWithSymbol(Val, *Sym, Type);
+  return !TargetObjectWriter->needsRelocateWithSymbol(Val, Type);
 }
 
-bool ELFObjectWriter::checkRelocation(MCContext &Ctx, SMLoc Loc,
-                                      const MCSectionELF *From,
+bool ELFObjectWriter::checkRelocation(SMLoc Loc, const MCSectionELF *From,
                                       const MCSectionELF *To) {
   if (isDwoSection(*From)) {
-    Ctx.reportError(Loc, "A dwo section may not contain relocations");
+    getContext().reportError(Loc, "A dwo section may not contain relocations");
     return false;
   }
   if (To && isDwoSection(*To)) {
-    Ctx.reportError(Loc, "A relocation may not refer to a dwo section");
+    getContext().reportError(Loc,
+                             "A relocation may not refer to a dwo section");
     return false;
   }
   return true;
@@ -1339,7 +1337,7 @@ void ELFObjectWriter::recordRelocation(const MCFragment &F,
   const MCSectionELF *SecA = (SymA && SymA->isInSection())
                                  ? cast<MCSectionELF>(&SymA->getSection())
                                  : nullptr;
-  if (DwoOS && !checkRelocation(Ctx, Fixup.getLoc(), &FixupSection, SecA))
+  if (DwoOS && !checkRelocation(Fixup.getLoc(), &FixupSection, SecA))
     return;
 
   bool IsPCRel = Backend.getFixupKindInfo(Fixup.getKind()).Flags &
@@ -1372,7 +1370,7 @@ void ELFObjectWriter::recordRelocation(const MCFragment &F,
   if (mc::isRelocRelocation(Fixup.getKind()))
     Type = Fixup.getKind() - FirstLiteralRelocationKind;
   else
-    Type = TargetObjectWriter->getRelocType(Ctx, Target, Fixup, IsPCRel);
+    Type = TargetObjectWriter->getRelocType(Fixup, Target, IsPCRel);
 
   bool UseSectionSym =
       SymA && SymA->getBinding() == ELF::STB_LOCAL && !SymA->isUndefined();

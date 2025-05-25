@@ -85,11 +85,12 @@ public:
     }
   }
 
-  virtual unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
-                                const MCFixup &Fixup, bool IsPCRel) const = 0;
+  virtual unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
+                                bool IsPCRel) const = 0;
 
-  virtual bool needsRelocateWithSymbol(const MCValue &Val, const MCSymbol &Sym,
-                                       unsigned Type) const;
+  virtual bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const {
+    return false;
+  }
 
   virtual void sortRelocs(std::vector<ELFRelocationEntry> &Relocs);
 
@@ -168,6 +169,7 @@ public:
                   bool IsLittleEndian);
 
   void reset() override;
+  void setAssembler(MCAssembler *Asm) override;
   void executePostLayoutBinding() override;
   void recordRelocation(const MCFragment &F, const MCFixup &Fixup,
                         MCValue Target, uint64_t &FixedValue) override;
@@ -182,7 +184,7 @@ public:
   bool useSectionSymbol(const MCValue &Val, const MCSymbolELF *Sym, uint64_t C,
                         unsigned Type) const;
 
-  bool checkRelocation(MCContext &Ctx, SMLoc Loc, const MCSectionELF *From,
+  bool checkRelocation(SMLoc Loc, const MCSectionELF *From,
                        const MCSectionELF *To);
 
   unsigned getELFHeaderEFlags() const { return ELFHeaderEFlags; }
