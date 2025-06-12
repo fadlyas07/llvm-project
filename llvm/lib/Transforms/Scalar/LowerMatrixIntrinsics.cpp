@@ -19,6 +19,7 @@
 
 #include "llvm/Transforms/Scalar/LowerMatrixIntrinsics.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -1223,7 +1224,7 @@ public:
       MatrixTy M = getMatrix(Inst->getOperand(0), SI, Builder);
       Builder.setFastMathFlags(getFastMathFlags(Inst));
 
-      for (auto &Vector : M.vectors()) {
+      for (auto *Vector : M.vectors()) {
         switch (Inst->getIntrinsicID()) {
         case Intrinsic::abs:
           Result.addVector(Builder.CreateBinaryIntrinsic(Intrinsic::abs, Vector,
@@ -2256,9 +2257,8 @@ public:
 
     Builder.setFastMathFlags(getFastMathFlags(Inst));
 
-    for (unsigned I = 0; I < SI.getNumVectors(); ++I)
-      Result.addVector(Builder.CreateBinOp(Inst->getOpcode(), A.getVector(I),
-                                           B.getVector(I)));
+    for (auto [AV, BV] : llvm::zip_equal(A.vectors(), B.vectors()))
+      Result.addVector(Builder.CreateBinOp(Inst->getOpcode(), AV, BV));
 
     return Result.addNumComputeOps(getNumOps(Result.getVectorTy()) *
                                    Result.getNumVectors());
@@ -2285,8 +2285,8 @@ public:
       }
     };
 
-    for (unsigned I = 0; I < SI.getNumVectors(); ++I)
-      Result.addVector(BuildVectorOp(M.getVector(I)));
+    for (auto *Vector : M.vectors())
+      Result.addVector(BuildVectorOp(Vector));
 
     return Result.addNumComputeOps(getNumOps(Result.getVectorTy()) *
                                    Result.getNumVectors());
@@ -2307,7 +2307,7 @@ public:
     auto *NewVTy = VectorType::get(OrigVTy->getElementType(),
                                    ElementCount::getFixed(M.getStride()));
 
-    for (auto &Vector : M.vectors())
+    for (auto *Vector : M.vectors())
       Result.addVector(Builder.CreateCast(Inst->getOpcode(), Vector, NewVTy));
 
     return Result.addNumComputeOps(getNumOps(Result.getVectorTy()) *
@@ -2326,19 +2326,17 @@ public:
     MatrixTy A = getMatrix(OpA, Shape, Builder);
     MatrixTy B = getMatrix(OpB, Shape, Builder);
 
-    Value *CondV[2];
+    SmallVector<Value*> CondV;
     if (isa<FixedVectorType>(Cond->getType())) {
       MatrixTy C = getMatrix(Cond, Shape, Builder);
-      CondV[0] = C.getVector(0);
-      CondV[1] = C.getVector(1);
+      llvm::copy(C.vectors(), std::back_inserter(CondV));
     } else {
-      CondV[0] = Cond;
-      CondV[1] = Cond;
+      CondV.resize(A.getNumVectors());
+      std::fill(CondV.begin(), CondV.end(), Cond);
     }
 
-    for (unsigned I = 0, E = Shape.getNumVectors(); I != E; ++I)
-      Result.addVector(
-          Builder.CreateSelect(CondV[I], A.getVector(I), B.getVector(I)));
+    for (auto [CV, AV, BV] : llvm::zip_equal(CondV, A.vectors(), B.vectors()))
+      Result.addVector(Builder.CreateSelect(CV, AV, BV));
 
     return Result.addNumComputeOps(getNumOps(Result.getVectorTy()) *
                                    Result.getNumVectors());
