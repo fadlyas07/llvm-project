@@ -44110,8 +44110,13 @@ bool X86TargetLowering::SimplifyDemandedVectorEltsForTargetNode(
           // For 128-bit v2X64/v4X32 instructions, use VPERMILPD/VPERMILPS.
           if (VT.is512BitVector() || VT.getScalarSizeInBits() <= 16)
             Ext = TLO.DAG.getNode(Opc, DL, HalfVT, M, V);
-          else
-            Ext = TLO.DAG.getNode(X86ISD::VPERMILPV, DL, HalfVT, V, M);
+          else {
+            MVT ShufSVT = MVT::getFloatingPointVT(VT.getScalarSizeInBits());
+            MVT ShufVT = HalfVT.changeVectorElementType(ShufSVT);
+            Ext = TLO.DAG.getNode(X86ISD::VPERMILPV, DL, ShufVT,
+                                  TLO.DAG.getBitcast(ShufVT, V), M);
+            Ext = TLO.DAG.getBitcast(HalfVT, Ext);
+          }
           SDValue Insert = widenSubVector(Ext, /*ZeroNewElements=*/false,
                                           Subtarget, TLO.DAG, DL, SizeInBits);
           return TLO.CombineTo(Op, Insert);
@@ -58839,16 +58844,18 @@ static SDValue combineConcatVectorOps(const SDLoc &DL, MVT VT,
           llvm::all_of(Ops, [](SDValue Op) {
             return Op.getConstantOperandAPInt(1) == 32;
           })) {
-        SDValue Res = DAG.getBitcast(MVT::v8i32, ConcatSubOperand(VT, Ops, 0));
-        SDValue Zero = getZeroVector(MVT::v8i32, Subtarget, DAG, DL);
-        if (Opcode == X86ISD::VSHLI) {
-          Res = DAG.getVectorShuffle(MVT::v8i32, DL, Res, Zero,
-                                     {8, 0, 8, 2, 8, 4, 8, 6});
-        } else {
-          Res = DAG.getVectorShuffle(MVT::v8i32, DL, Res, Zero,
-                                     {1, 8, 3, 8, 5, 8, 7, 8});
+        if (SDValue Res = CombineSubOperand(VT, Ops, 0)) {
+          SDValue Zero = getZeroVector(MVT::v8i32, Subtarget, DAG, DL);
+          Res = DAG.getBitcast(MVT::v8i32, Res);
+          if (Opcode == X86ISD::VSHLI) {
+            Res = DAG.getVectorShuffle(MVT::v8i32, DL, Res, Zero,
+                                       {8, 0, 8, 2, 8, 4, 8, 6});
+          } else {
+            Res = DAG.getVectorShuffle(MVT::v8i32, DL, Res, Zero,
+                                       {1, 8, 3, 8, 5, 8, 7, 8});
+          }
+          return DAG.getBitcast(VT, Res);
         }
-        return DAG.getBitcast(VT, Res);
       }
       [[fallthrough]];
     case X86ISD::VSRAI:
