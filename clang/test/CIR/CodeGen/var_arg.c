@@ -15,7 +15,8 @@ void varargs(int count, ...) {
     __builtin_va_end(args);
 }
 
-// CIR: cir.func dso_local @varargs(%[[COUNT:.+]]: !s32i{{.*}}, ...)
+// CIR-LABEL: cir.func dso_local @varargs
+// CIR-SAME: (%[[COUNT:.+]]: !s32i{{.*}}, ...)
 // CIR:   %[[COUNT_ADDR:.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["count", init]
 // CIR:   %[[ARGS:.+]] = cir.alloca !cir.array<!rec___va_list_tag x 1>, !cir.ptr<!cir.array<!rec___va_list_tag x 1>>, ["args"]
 // CIR:   cir.store %[[COUNT]], %[[COUNT_ADDR]] : !s32i, !cir.ptr<!s32i>
@@ -48,7 +49,8 @@ void stdarg_start(int count, ...) {
     __builtin_va_end(args);
 }
 
-// CIR: cir.func dso_local @stdarg_start(%[[COUNT2:.+]]: !s32i{{.*}}, ...)
+// CIR-LABEL: cir.func dso_local @stdarg_start
+// CIR-SAME: (%[[COUNT2:.+]]: !s32i{{.*}}, ...)
 // CIR:   %[[COUNT2_ADDR:.+]] = cir.alloca !s32i, !cir.ptr<!s32i>, ["count", init]
 // CIR:   %[[ARGS2:.+]] = cir.alloca !cir.array<!rec___va_list_tag x 1>, !cir.ptr<!cir.array<!rec___va_list_tag x 1>>, ["args"]
 // CIR:   cir.store %[[COUNT2]], %[[COUNT2_ADDR]] : !s32i, !cir.ptr<!s32i>
