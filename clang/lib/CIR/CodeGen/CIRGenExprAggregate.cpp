@@ -144,10 +144,7 @@ public:
   void VisitUnaryCoawait(UnaryOperator *e) {
     cgf.cgm.errorNYI(e->getSourceRange(), "AggExprEmitter: VisitUnaryCoawait");
   }
-  void VisitUnaryExtension(UnaryOperator *e) {
-    cgf.cgm.errorNYI(e->getSourceRange(),
-                     "AggExprEmitter: VisitUnaryExtension");
-  }
+  void VisitUnaryExtension(UnaryOperator *e) { Visit(e->getSubExpr()); }
   void VisitSubstNonTypeTemplateParmExpr(SubstNonTypeTemplateParmExpr *e) {
     cgf.cgm.errorNYI(e->getSourceRange(),
                      "AggExprEmitter: VisitSubstNonTypeTemplateParmExpr");
@@ -213,9 +210,11 @@ public:
   }
   void VisitChooseExpr(const ChooseExpr *e) { Visit(e->getChosenSubExpr()); }
   void VisitCXXParenListInitExpr(CXXParenListInitExpr *e) {
-    cgf.cgm.errorNYI(e->getSourceRange(),
-                     "AggExprEmitter: VisitCXXParenListInitExpr");
+    visitCXXParenListOrInitListExpr(e, e->getInitExprs(),
+                                    e->getInitializedFieldInUnion(),
+                                    e->getArrayFiller());
   }
+
   void VisitArrayInitLoopExpr(const ArrayInitLoopExpr *e,
                               llvm::Value *outerBegin = nullptr) {
     cgf.cgm.errorNYI(e->getSourceRange(),
