@@ -126,15 +126,16 @@ protected:
   SpecialCaseList &operator=(SpecialCaseList const &) = delete;
 
 private:
+  using Match = std::pair<StringRef, unsigned>;
+  static constexpr Match NotMatched = {"", 0};
+
   // Lagacy v1 matcher.
   class RegexMatcher {
   public:
     LLVM_ABI Error insert(StringRef Pattern, unsigned LineNumber);
     LLVM_ABI void preprocess(bool BySize);
 
-    LLVM_ABI void
-    match(StringRef Query,
-          llvm::function_ref<void(StringRef Rule, unsigned LineNo)> Cb) const;
+    LLVM_ABI Match match(StringRef Query) const;
 
     struct Reg {
       Reg(StringRef Name, unsigned LineNo, Regex &&Rg)
@@ -152,9 +153,7 @@ private:
     LLVM_ABI Error insert(StringRef Pattern, unsigned LineNumber);
     LLVM_ABI void preprocess(bool BySize);
 
-    LLVM_ABI void
-    match(StringRef Query,
-          llvm::function_ref<void(StringRef Rule, unsigned LineNo)> Cb) const;
+    LLVM_ABI Match match(StringRef Query) const;
 
     struct Glob {
       Glob(StringRef Name, unsigned LineNo, GlobPattern &&Pattern)
@@ -168,11 +167,10 @@ private:
 
     RadixTree<iterator_range<StringRef::const_iterator>,
               RadixTree<iterator_range<StringRef::const_reverse_iterator>,
-                        SmallVector<const GlobMatcher::Glob *, 1>>>
+                        SmallVector<int, 1>>>
         PrefixSuffixToGlob;
 
-    RadixTree<iterator_range<StringRef::const_iterator>,
-              SmallVector<const GlobMatcher::Glob *, 1>>
+    RadixTree<iterator_range<StringRef::const_iterator>, SmallVector<int, 1>>
         SubstrToGlob;
   };
 
@@ -184,14 +182,10 @@ private:
     LLVM_ABI Error insert(StringRef Pattern, unsigned LineNumber);
     LLVM_ABI void preprocess(bool BySize);
 
-    LLVM_ABI void
-    match(StringRef Query,
-          llvm::function_ref<void(StringRef Rule, unsigned LineNo)> Cb) const;
+    LLVM_ABI Match match(StringRef Query) const;
 
     LLVM_ABI bool matchAny(StringRef Query) const {
-      bool R = false;
-      match(Query, [&](StringRef, unsigned) { R = true; });
-      return R;
+      return match(Query) != NotMatched;
     }
 
     std::variant<RegexMatcher, GlobMatcher> M;
@@ -203,19 +197,19 @@ private:
 protected:
   class Section {
   public:
-    Section(StringRef Str, unsigned FileIdx, bool UseGlobs)
-        : SectionMatcher(UseGlobs, /*RemoveDotSlash=*/false), SectionStr(Str),
+    Section(StringRef Name, unsigned FileIdx, bool UseGlobs)
+        : SectionMatcher(UseGlobs, /*RemoveDotSlash=*/false), Name(Name),
           FileIdx(FileIdx) {}
 
     Section(Section &&) = default;
 
-    // Return name of the section, its entire string in [].
-    StringRef name() const { return SectionStr; }
+    // Returns name of the section, its entire string in [].
+    StringRef name() const { return Name; }
 
     // Returns true if string 'Name' matches section name interpreted as a glob.
     LLVM_ABI bool matchName(StringRef Name) const;
 
-    // Return sequence number of the file where this section is defined.
+    // Returns sequence number of the file where this section is defined.
     unsigned fileIndex() const { return FileIdx; }
 
     // Helper method to search by Prefix, Query, and Category. Returns
@@ -238,7 +232,7 @@ protected:
     findMatcher(StringRef Prefix, StringRef Category) const;
 
     Matcher SectionMatcher;
-    std::string SectionStr;
+    StringRef Name;
     SectionEntries Entries;
     unsigned FileIdx;
   };
