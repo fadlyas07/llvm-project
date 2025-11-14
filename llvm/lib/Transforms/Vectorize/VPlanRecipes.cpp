@@ -821,10 +821,9 @@ Value *VPInstruction::generate(VPTransformState &State) {
     auto *OrigPhi = cast<PHINode>(PhiR->getUnderlyingValue());
     Value *ReducedPartRdx = State.get(getOperand(2));
     for (unsigned Idx = 3; Idx < getNumOperands(); ++Idx)
-      ReducedPartRdx = Builder.CreateBinOp(
-          (Instruction::BinaryOps)RecurrenceDescriptor::getOpcode(
-              RecurKind::AnyOf),
-          State.get(getOperand(Idx)), ReducedPartRdx, "bin.rdx");
+      ReducedPartRdx =
+          Builder.CreateBinOp(Instruction::Or, State.get(getOperand(Idx)),
+                              ReducedPartRdx, "bin.rdx");
     return createAnyOfReduction(Builder, ReducedPartRdx,
                                 State.get(getOperand(1), VPLane(0)), OrigPhi);
   }
@@ -2377,7 +2376,9 @@ void VPWidenIntOrFpInductionRecipe::print(raw_ostream &O, const Twine &Indent,
                                           VPSlotTracker &SlotTracker) const {
   O << Indent;
   printAsOperand(O, SlotTracker);
-  O << " = WIDEN-INDUCTION  ";
+  O << " = WIDEN-INDUCTION";
+  printFlags(O);
+  O << " ";
   printOperands(O, SlotTracker);
 
   if (auto *TI = getTruncInst())
