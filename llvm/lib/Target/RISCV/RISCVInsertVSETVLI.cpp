@@ -607,12 +607,36 @@ public:
     }
   }
 
-  unsigned getSEW() const { return SEW; }
-  RISCVVType::VLMUL getVLMUL() const { return VLMul; }
-  bool getTailAgnostic() const { return TailAgnostic; }
-  bool getMaskAgnostic() const { return MaskAgnostic; }
-  bool getAltFmt() const { return AltFmt; }
-  unsigned getTWiden() const { return TWiden; }
+  unsigned getSEW() const {
+    assert(isValid() && !isUnknown() &&
+           "Can't use VTYPE for uninitialized or unknown");
+    return SEW;
+  }
+  RISCVVType::VLMUL getVLMUL() const {
+    assert(isValid() && !isUnknown() &&
+           "Can't use VTYPE for uninitialized or unknown");
+    return VLMul;
+  }
+  bool getTailAgnostic() const {
+    assert(isValid() && !isUnknown() &&
+           "Can't use VTYPE for uninitialized or unknown");
+    return TailAgnostic;
+  }
+  bool getMaskAgnostic() const {
+    assert(isValid() && !isUnknown() &&
+           "Can't use VTYPE for uninitialized or unknown");
+    return MaskAgnostic;
+  }
+  bool getAltFmt() const {
+    assert(isValid() && !isUnknown() &&
+           "Can't use VTYPE for uninitialized or unknown");
+    return AltFmt;
+  }
+  unsigned getTWiden() const {
+    assert(isValid() && !isUnknown() &&
+           "Can't use VTYPE for uninitialized or unknown");
+    return TWiden;
+  }
 
   bool hasNonZeroAVL(const LiveIntervals *LIS) const {
     if (hasAVLImm())
@@ -837,7 +861,7 @@ public:
   /// Implement operator<<.
   /// @{
   void print(raw_ostream &OS) const {
-    OS << "{";
+    OS << '{';
     switch (State) {
     case AVLState::Uninitialized:
       OS << "Uninitialized";
@@ -855,24 +879,26 @@ public:
       OS << "AVLVLMAX";
       break;
     }
-    OS << ", ";
+    if (isValid() && !isUnknown()) {
+      OS << ", ";
 
-    unsigned LMul;
-    bool Fractional;
-    std::tie(LMul, Fractional) = decodeVLMUL(VLMul);
+      unsigned LMul;
+      bool Fractional;
+      std::tie(LMul, Fractional) = decodeVLMUL(VLMul);
 
-    OS << "VLMul=";
-    if (Fractional)
-      OS << "mf";
-    else
-      OS << "m";
-    OS << LMul << ", "
-       << "SEW=e" << (unsigned)SEW << ", "
-       << "TailAgnostic=" << (bool)TailAgnostic << ", "
-       << "MaskAgnostic=" << (bool)MaskAgnostic << ", "
-       << "SEWLMULRatioOnly=" << (bool)SEWLMULRatioOnly << ", "
-       << "TWiden=" << (unsigned)TWiden << ", "
-       << "AltFmt=" << (bool)AltFmt << "}";
+      OS << "VLMul=m";
+      if (Fractional)
+        OS << 'f';
+      OS << LMul << ", "
+         << "SEW=e" << (unsigned)SEW << ", "
+         << "TailAgnostic=" << (bool)TailAgnostic << ", "
+         << "MaskAgnostic=" << (bool)MaskAgnostic << ", "
+         << "SEWLMULRatioOnly=" << (bool)SEWLMULRatioOnly << ", "
+         << "TWiden=" << (unsigned)TWiden << ", "
+         << "AltFmt=" << (bool)AltFmt;
+    }
+
+    OS << '}';
   }
 #endif
 };
