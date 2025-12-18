@@ -56,4 +56,22 @@ TEST(LlvmLibcNetinetInTest, IN6Macro) {
   EXPECT_TRUE(IN6_IS_ADDR_MC_GLOBAL(buff));
   buff[1] = 0;
   buff[0] = 0;
+
+  EXPECT_FALSE(IN6_IS_ADDR_V4MAPPED(buff));
+  buff[10] = 0xff;
+  buff[11] = 0xff;
+  EXPECT_TRUE(IN6_IS_ADDR_V4MAPPED(buff));
+  buff[10] = 0;
+  buff[11] = 0;
+
+  for (int i = 12; i < 16; ++i) {
+    buff[i] ^= 42;
+    EXPECT_TRUE(IN6_IS_ADDR_V4COMPAT(buff));
+    buff[i] ^= 42;
+  }
+  for (int i = 0; i < 12; ++i) {
+    buff[i] ^= 42;
+    EXPECT_FALSE(IN6_IS_ADDR_V4COMPAT(buff));
+    buff[i] ^= 42;
+  }
 }
