@@ -17,6 +17,8 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+#include "CommonTestUtils.h"
+
 #include <chrono>
 #include <deque>
 #include <future>
@@ -66,18 +68,6 @@ public:
   void onShutdown(OnCompleteFn OnComplete) override { OnComplete(); }
 
   void doMoreConfig(int) noexcept {}
-};
-
-static ExecutorProcessInfo mockExecutorProcessInfo() noexcept {
-  return ExecutorProcessInfo("arm64-apple-darwin", 16384);
-}
-
-class NoDispatcher : public TaskDispatcher {
-public:
-  void dispatch(std::unique_ptr<Task> T) override {
-    assert(false && "strictly no dispatching!");
-  }
-  void shutdown() override {}
 };
 
 class EnqueueingDispatcher : public TaskDispatcher {
@@ -273,10 +263,6 @@ private:
   orc_rt_WrapperFunction Fn;
 };
 
-// Non-overloaded version of cantFail: allows easy construction of
-// move_only_functions<void(Error)>s.
-static void noErrors(Error Err) { cantFail(std::move(Err)); }
-
 TEST(SessionTest, TrivialConstructionAndDestruction) {
   Session S(mockExecutorProcessInfo(), std::make_unique<NoDispatcher>(),
             noErrors);
@@ -396,41 +382,6 @@ TEST(SessionTest, CreateServiceAndUseRef) {
             noErrors);
   auto &CS = S.createService<ConfigurableService>(42);
   CS.doMoreConfig(1);
-}
-
-TEST(SessionTest, ControllerInterfaceContainsSessionByDefault) {
-  Session S(mockExecutorProcessInfo(), std::make_unique<NoDispatcher>(),
-            noErrors);
-  ASSERT_TRUE(S.controllerInterface()->count("orc_rt_SessionInstance"));
-  EXPECT_EQ(S.controllerInterface()->at("orc_rt_SessionInstance"),
-            static_cast<void *>(&S));
-}
-
-TEST(SessionTest, ControllerInterfaceWithRef) {
-  Session S(mockExecutorProcessInfo(), std::make_unique<NoDispatcher>(),
-            noErrors);
-  int X = 0, Y = 0;
-  S.controllerInterface().with_ref([&](SimpleSymbolTable &ST) {
-    std::pair<const char *, void *> Syms[] = {
-        {"orc_rt_A", static_cast<void *>(&X)},
-        {"orc_rt_B", static_cast<void *>(&Y)}};
-    cantFail(ST.addUnique(Syms));
-  });
-
-  EXPECT_EQ(S.controllerInterface()->at("orc_rt_A"), &X);
-  EXPECT_EQ(S.controllerInterface()->at("orc_rt_B"), &Y);
-}
-
-TEST(SessionTest, ControllerInterfaceConstAccess) {
-  Session S(mockExecutorProcessInfo(), std::make_unique<NoDispatcher>(),
-            noErrors);
-  int X = 0;
-  std::pair<const char *, void *> Syms[] = {{"orc_rt_X", &X}};
-  cantFail(S.controllerInterface()->addUnique(Syms));
-
-  const Session &CS = S;
-  ASSERT_TRUE(CS.controllerInterface()->count("orc_rt_X"));
-  EXPECT_EQ(CS.controllerInterface()->at("orc_rt_X"), &X);
 }
 
 TEST(ControllerAccessTest, Basics) {
