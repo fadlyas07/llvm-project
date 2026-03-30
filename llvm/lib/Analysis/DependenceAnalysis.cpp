@@ -1386,17 +1386,6 @@ bool DependenceInfo::weakCrossingSIVtest(const SCEVAddRecExpr *Src,
   Level--;
   const SCEV *Delta = SE->getMinusSCEV(DstConst, SrcConst);
   LLVM_DEBUG(dbgs() << "\t    Delta = " << *Delta << "\n");
-  if (Delta->isZero() && SE->isKnownNonZero(Coeff)) {
-    Result.DV[Level].Direction &= ~Dependence::DVEntry::LT;
-    Result.DV[Level].Direction &= ~Dependence::DVEntry::GT;
-    ++WeakCrossingSIVsuccesses;
-    if (!Result.DV[Level].Direction) {
-      ++WeakCrossingSIVindependence;
-      return true;
-    }
-    Result.DV[Level].Distance = Delta; // = 0
-    return false;
-  }
   const SCEVConstant *ConstCoeff = dyn_cast<SCEVConstant>(Coeff);
   if (!ConstCoeff)
     return false;
@@ -1429,7 +1418,7 @@ bool DependenceInfo::weakCrossingSIVtest(const SCEVAddRecExpr *Src,
   LLVM_DEBUG(dbgs() << "\t    SrcRange = " << SrcRange << "\n");
   LLVM_DEBUG(dbgs() << "\t    DstRange = " << DstRange << "\n");
   if (SrcRange.intersectWith(DstRange).isSingleElement()) {
-    // The ranges touch at exactly one value (i = i' = BTC).
+    // The ranges touch at exactly one value (i = i' = 0 or i = i' = BTC).
     Result.DV[Level].Direction &= ~Dependence::DVEntry::LT;
     Result.DV[Level].Direction &= ~Dependence::DVEntry::GT;
     ++WeakCrossingSIVsuccesses;
@@ -1800,9 +1789,6 @@ bool DependenceInfo::weakZeroSIVtestImpl(const SCEVAddRecExpr *AR,
   if (!ConstCoeff)
     return false;
 
-  const SCEV *NewDelta =
-      SE->isKnownNegative(ConstCoeff) ? SE->getNegativeSCEV(Delta) : Delta;
-
   if (const SCEV *UpperBound =
           collectUpperBound(AR->getLoop(), Delta->getType())) {
     LLVM_DEBUG(dbgs() << "\t    UpperBound = " << *UpperBound << "\n");
@@ -1820,15 +1806,6 @@ bool DependenceInfo::weakZeroSIVtestImpl(const SCEVAddRecExpr *AR,
       }
       return false;
     }
-  }
-
-  // check that Delta/ARCoeff >= 0
-  // really check that NewDelta >= 0
-  if (SE->isKnownNegative(NewDelta)) {
-    // No dependence, newDelta < 0
-    ++WeakZeroSIVindependence;
-    ++WeakZeroSIVsuccesses;
-    return true;
   }
 
   // if ARCoeff doesn't divide Delta, then no dependence
