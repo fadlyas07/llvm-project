@@ -4102,11 +4102,16 @@ bool Compiler<Emitter>::VisitCXXNewExpr(const CXXNewExpr *E) {
             DynamicInit->getType()->isArrayType()) {
           QualType ElemType =
               DynamicInit->getType()->getAsArrayTypeUnsafe()->getElementType();
-          PrimType InitT = classifyPrim(ElemType);
-          if (!this->visitZeroInitializer(InitT, ElemType, E))
-            return false;
-          if (!this->emitStorePop(InitT, E))
-            return false;
+          if (OptPrimType InitT = classify(ElemType)) {
+            if (!this->visitZeroInitializer(*InitT, ElemType, E))
+              return false;
+            if (!this->emitStorePop(*InitT, E))
+              return false;
+          } else {
+            assert(ElemType->isArrayType());
+            if (!this->visitZeroArrayInitializer(ElemType, E))
+              return false;
+          }
         } else if (DynamicInit) {
           if (OptPrimType InitT = classify(DynamicInit)) {
             if (!this->visit(DynamicInit))
@@ -5393,10 +5398,11 @@ bool Compiler<Emitter>::visitDtorCall(const VarDecl *VD, const APValue &Value) {
   DeclScope<Emitter> LocalScope(this, VD);
   // Create a local variable to use as the instance.
   QualType Ty = VD->getType();
-  Descriptor *D = P.createDescriptor(
-      VD, Ty.getTypePtr(), Descriptor::InlineDescMD, /*IsConst=*/false,
-      /*IsTemporary=*/false, /*IsMutable=*/false,
-      /*IsVolatile=*/Ty.isVolatileQualified(), nullptr);
+  Descriptor *D =
+      P.createDescriptor(VD, Ty.getTypePtr(), Descriptor::InlineDescMD,
+                         /*IsConst=*/Ty.isConstQualified(),
+                         /*IsTemporary=*/false, /*IsMutable=*/false,
+                         /*IsVolatile=*/Ty.isVolatileQualified(), nullptr);
   if (!D)
     return false;
 
