@@ -34,19 +34,24 @@ class MCInst;
 
 /// Used to provide key value pairs for feature and CPU bit flags.
 struct SubtargetFeatureKV {
-  // Note: PrivKey/PrivDesc should not be accessed and will be removed. They are
-  // not private to keep this struct POD.
-  const char *PrivKey;                  ///< K-V key string
-  const char *PrivDesc;                 ///< Help descriptor
+private:
+  const char *Key;                      ///< K-V key string
+  const char *Desc;                     ///< Help descriptor
+
+public:
   unsigned Value;                       ///< K-V integer value
   FeatureBitArray Implies;              ///< K-V bit mask
+
+  constexpr SubtargetFeatureKV(const char *Key, const char *Desc,
+                               unsigned Value, FeatureBitArray Implies)
+      : Key(Key), Desc(Desc), Value(Value), Implies(Implies) {}
 
   // Because of relative string offsets, this type is not copyable.
   SubtargetFeatureKV(const SubtargetFeatureKV &) = delete;
   SubtargetFeatureKV &operator=(const SubtargetFeatureKV &) = delete;
 
-  const char *key() const { return PrivKey; }
-  const char *desc() const { return PrivDesc; }
+  const char *key() const { return Key; }
+  const char *desc() const { return Desc; }
 
   /// Compare routine for std::lower_bound
   bool operator<(StringRef S) const { return StringRef(key()) < S; }
@@ -61,19 +66,26 @@ struct SubtargetFeatureKV {
 
 /// Used to provide key value pairs for feature and CPU bit flags.
 struct SubtargetSubTypeKV {
-  // Note: PrivKey/PrivSchedModel should not be accessed and will be removed.
-  // They are not private to keep this struct POD.
-  const char *PrivKey;                  ///< K-V key string
+private:
+  const char *Key; ///< K-V key string
+  const MCSchedModel *SchedModel;
+
+public:
   FeatureBitArray Implies;              ///< K-V bit mask
   FeatureBitArray TuneImplies;          ///< K-V bit mask
-  const MCSchedModel *PrivSchedModel;
+
+  constexpr SubtargetSubTypeKV(const char *Key, FeatureBitArray Implies,
+                               FeatureBitArray TuneImplies,
+                               const MCSchedModel *SchedModel)
+      : Key(Key), SchedModel(SchedModel), Implies(Implies),
+        TuneImplies(TuneImplies) {}
 
   // Because of relative string offsets, this type is not copyable.
   SubtargetSubTypeKV(const SubtargetSubTypeKV &) = delete;
   SubtargetSubTypeKV &operator=(const SubtargetSubTypeKV &) = delete;
 
-  const char *key() const { return PrivKey; }
-  const MCSchedModel *schedModel() const { return PrivSchedModel; }
+  const char *key() const { return Key; }
+  const MCSchedModel *schedModel() const { return SchedModel; }
 
   /// Compare routine for std::lower_bound
   bool operator<(StringRef S) const { return StringRef(key()) < S; }
