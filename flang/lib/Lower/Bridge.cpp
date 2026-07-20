@@ -39,6 +39,7 @@
 #include "flang/Optimizer/Builder/Character.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Builder/Runtime/Assign.h"
+#include "flang/Optimizer/Builder/Runtime/CUDA/Descriptor.h"
 #include "flang/Optimizer/Builder/Runtime/Character.h"
 #include "flang/Optimizer/Builder/Runtime/Derived.h"
 #include "flang/Optimizer/Builder/Runtime/EnvironmentDefaults.h"
@@ -1246,6 +1247,13 @@ public:
     return bridge.fctCtx();
   }
 
+  Fortran::lower::StatementContext &getCudaCleanupCtx() override final {
+    if (!activeConstructStack.empty() &&
+        activeConstructStack.back().eval.isA<Fortran::parser::BlockConstruct>())
+      return activeConstructStack.back().stmtCtx;
+    return bridge.cudaCleanupCtx();
+  }
+
   /// Initializes values for STAT and ERRMSG
   std::pair<mlir::Value, mlir::Value>
   genStatAndErrmsg(mlir::Location loc,
@@ -1972,11 +1980,20 @@ private:
   void genExitRoutine(bool earlyReturn, mlir::ValueRange retval = {}) {
     if (blockIsUnterminated()) {
       bridge.openAccCtx().finalizeAndKeep();
+      if (bridge.cudaCleanupCtx().hasCode()) {
+        mlir::Location loc = toLocation();
+        mlir::Value active =
+            fir::runtime::cuda::genDeviceIsActive(*builder, loc);
+        builder->genIfThen(loc, active)
+            .genThen([&]() { bridge.cudaCleanupCtx().finalizeAndKeep(); })
+            .end();
+      }
       bridge.fctCtx().finalizeAndKeep();
       mlir::func::ReturnOp::create(*builder, toLocation(), retval);
     }
     if (!earlyReturn) {
       bridge.openAccCtx().pop();
+      bridge.cudaCleanupCtx().pop();
       bridge.fctCtx().pop();
     }
   }
@@ -2815,8 +2832,9 @@ private:
                               const IncrementLoopInfo &info,
                               bool *isConst = nullptr) {
     mlir::Location loc = toLocation();
-    mlir::Type controlType = info.isStructured() ? builder->getIndexType()
-                                                 : info.getLoopVariableType();
+    mlir::Type controlType = info.isStructured() && info.isConcurrent
+                                 ? builder->getIndexType()
+                                 : info.getLoopVariableType();
     Fortran::lower::StatementContext stmtCtx;
     if (expr) {
       if (isConst)
@@ -3047,19 +3065,18 @@ private:
         if (genDoConcurrent)
           continue;
 
-        // The loop variable is a doLoop op argument.
-        mlir::Type loopVarType = info.getLoopVariableType();
+        // Lower the loop without the secondary-induction iter_arg so memory
+        // recurrences (e.g. reductions) stay visible to later analyses. The DO
+        // variable is recomputed from the induction variable in the body; its
+        // post-loop value is materialized in genFIRIncrementLoopEnd.
         auto loopOp = fir::DoLoopOp::create(
             *builder, loc, lowerValue, upperValue, stepValue,
-            /*unordered=*/false,
-            /*finalCountValue=*/false,
-            builder->createConvert(loc, loopVarType, lowerValue));
+            /*unordered=*/false, /*finalCountValue=*/false,
+            /*iterArgs=*/mlir::ValueRange{});
         info.loopOp = loopOp;
         builder->setInsertionPointToStart(loopOp.getBody());
-        mlir::Value loopValue = loopOp.getRegionIterArgs()[0];
-
-        // Update the loop variable value in case it has non-index references.
-        fir::StoreOp::create(*builder, loc, loopValue, info.loopVariable);
+        fir::StoreOp::create(*builder, loc, loopOp.getInductionVar(),
+                             info.loopVariable);
         addLoopAnnotationAttr(info, dirs);
         continue;
       }
@@ -3200,23 +3217,31 @@ private:
           continue;
         }
 
-        // End fir.do_loop.
-        // Decrement tripVariable.
+        // End fir.do_loop. The loop carries no secondary-induction iter_arg, so
+        // materialize the Fortran post-loop value lb + tripCount*step after the
+        // loop for later uses of the DO variable. Compute it in the loop's
+        // index type (matching how the loop counts iterations) so the trip
+        // arithmetic does not overflow the DO variable's type for empty
+        // range-extreme loops.
         auto doLoopOp = mlir::cast<fir::DoLoopOp>(info.loopOp);
-        builder->setInsertionPointToEnd(doLoopOp.getBody());
-        // Step loopVariable to help optimizations such as vectorization.
-        // Induction variable elimination will clean up as necessary.
-        mlir::Value step = builder->createConvert(
-            loc, info.getLoopVariableType(), doLoopOp.getStep());
-        mlir::Value loopVar =
-            fir::LoadOp::create(*builder, loc, info.loopVariable);
-        mlir::Value loopVarInc =
-            mlir::arith::AddIOp::create(*builder, loc, loopVar, step, iofAttr);
-        fir::ResultOp::create(*builder, loc, loopVarInc);
         builder->setInsertionPointAfter(doLoopOp);
-        // The loop control variable may be used after the loop.
-        fir::StoreOp::create(*builder, loc, doLoopOp.getResult(0),
-                             info.loopVariable);
+        mlir::Type idxTy = builder->getIndexType();
+        mlir::Value lb =
+            builder->createConvert(loc, idxTy, doLoopOp.getLowerBound());
+        mlir::Value ub =
+            builder->createConvert(loc, idxTy, doLoopOp.getUpperBound());
+        mlir::Value st = builder->createConvert(loc, idxTy, doLoopOp.getStep());
+        mlir::Value zero = builder->createIntegerConstant(loc, idxTy, 0);
+        mlir::Value trip = mlir::arith::SubIOp::create(*builder, loc, ub, lb);
+        trip = mlir::arith::AddIOp::create(*builder, loc, trip, st);
+        trip = mlir::arith::DivSIOp::create(*builder, loc, trip, st);
+        mlir::Value empty = mlir::arith::CmpIOp::create(
+            *builder, loc, mlir::arith::CmpIPredicate::slt, trip, zero);
+        trip = mlir::arith::SelectOp::create(*builder, loc, empty, zero, trip);
+        mlir::Value last = mlir::arith::MulIOp::create(*builder, loc, trip, st);
+        last = mlir::arith::AddIOp::create(*builder, loc, lb, last);
+        last = builder->createConvert(loc, info.getLoopVariableType(), last);
+        fir::StoreOp::create(*builder, loc, last, info.loopVariable);
         continue;
       }
 
@@ -3288,7 +3313,11 @@ private:
 
     // Start a new block before generating the scf.execute_region op if needed.
     // This avoids generating the region directly after a terminator (e.g. a
-    // conditional branch from a parent construct).
+    // conditional branch from a parent construct).  A non-null firstStmt.block
+    // here is a landing pad the enclosing wrap's createEmptyBlocks pre-
+    // allocated for us — startNewFunction runs resetEvaluationBlocks before
+    // each entry-point pass, so we can trust the pointer isn't stale from a
+    // previous pass.
     if (Fortran::lower::pft::isWrappableConstruct(eval) &&
         eval.hasNestedEvaluations()) {
       Fortran::lower::pft::Evaluation &firstStmt =
@@ -6322,6 +6351,7 @@ private:
   void startNewFunction(Fortran::lower::pft::FunctionLikeUnit &funit) {
     assert(!builder && "expected nullptr");
     bridge.fctCtx().pushScope();
+    bridge.cudaCleanupCtx().pushScope();
     bridge.openAccCtx().pushScope();
     const Fortran::semantics::Scope &scope = funit.getScope();
     LLVM_DEBUG(llvm::dbgs() << "\n[bridge - startNewFunction]";
@@ -6486,6 +6516,10 @@ private:
     // with dummy_scope operands.
     resetRegisteredDummySymbols();
 
+    // Clear any Evaluation::block pointers left over from a previous
+    // entry-point pass over this shared PFT.
+    resetEvaluationBlocks(funit.evaluationList);
+
     // Create most function blocks in advance.
     createEmptyBlocks(funit.evaluationList);
 
@@ -6510,6 +6544,18 @@ private:
     if (Fortran::lower::pft::Evaluation *alternateEntryEval =
             funit.getEntryEval())
       genBranch(alternateEntryEval->lexicalSuccessor->block);
+  }
+
+  /// Recursively null every Evaluation::block in \p evaluationList.  Called
+  /// once per entry-point pass over a shared PFT so a later pass never sees
+  /// block pointers that belong to a prior pass's function or wrap region.
+  void resetEvaluationBlocks(
+      std::list<Fortran::lower::pft::Evaluation> &evaluationList) {
+    for (Fortran::lower::pft::Evaluation &eval : evaluationList) {
+      eval.block = nullptr;
+      if (eval.evaluationList)
+        resetEvaluationBlocks(*eval.evaluationList);
+    }
   }
 
   /// Create global blocks for the current function. This eliminates the
