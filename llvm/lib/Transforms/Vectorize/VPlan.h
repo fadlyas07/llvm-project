@@ -126,7 +126,7 @@ private:
   /// Subclass identifier (for isa/dyn_cast).
   const VPBlockTy SubclassID;
 
-  /// Unique number.
+  /// Unique number, used as node number in the dominator tree.
   unsigned Number;
 
   /// Add \p Successor as the last successor to this block.
@@ -353,8 +353,10 @@ public:
     return std::distance(Successors.begin(), find(Successors, Succ));
   }
 
-  /// Set a per-plan unique number, used for dominator tree.
+  /// Return the unique number of the block.
   unsigned getNumber() const { return Number; }
+
+  /// Set the unique number of the block, used for dominator tree.
   void setNumber(unsigned N) { Number = N; }
 
   /// The method which generates the output IR that correspond to this
@@ -4673,6 +4675,14 @@ public:
   /// An indicator whether this region is to generate multiple replicated
   /// instances of output IR corresponding to its VPBlockBases.
   bool isReplicator() const { return !CanIVInfo; }
+
+  /// Return the VPBranchOnMaskRecipe from the entry block of this replicating
+  /// region.
+  const VPBranchOnMaskRecipe *getEntryBranchOnMask() const;
+  VPBranchOnMaskRecipe *getEntryBranchOnMask() {
+    return const_cast<VPBranchOnMaskRecipe *>(
+        static_cast<const VPRegionBlock *>(this)->getEntryBranchOnMask());
+  }
 
   /// The method which generates the output IR instructions that correspond to
   /// this VPRegionBlock, thereby "executing" the VPlan.
