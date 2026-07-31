@@ -500,6 +500,7 @@ static void fillAMDGCNFeatureMap(StringRef GPU, const Triple &T,
     Features["gfx12-insts"] = true;
     Features["gfx1250-insts"] = true;
     Features["gfx13-insts"] = true;
+    Features["flat-global-insts"] = true;
     Features["bitop3-insts"] = true;
     Features["prng-inst"] = true;
     Features["tanh-insts"] = true;
@@ -516,6 +517,8 @@ static void fillAMDGCNFeatureMap(StringRef GPU, const Triple &T,
     Features["atomic-flat-pk-add-16-insts"] = true;
     Features["atomic-global-pk-add-bf16-inst"] = true;
     Features["atomic-ds-pk-add-16-insts"] = true;
+    Features["atomic-fmin-fmax-global-f32"] = true;
+    Features["atomic-fmin-fmax-global-f64"] = true;
     Features["s-wakeup-barrier-inst"] = true;
     Features["f16bf16-to-fp6bf6-cvt-scale-insts"] = true;
     Features["f32-to-fp6bf6-cvt-scale-insts"] = true;
@@ -524,6 +527,7 @@ static void fillAMDGCNFeatureMap(StringRef GPU, const Triple &T,
     Features["lerp-inst"] = true;
     Features["sad-insts"] = true;
     Features["qsad-insts"] = true;
+    Features["mqsad-pk-insts"] = true;
     Features["cvt-pknorm-vop2-insts"] = true;
     Features["cvt-pknorm-vop3-insts"] = true;
     Features["image-insts"] = true;
