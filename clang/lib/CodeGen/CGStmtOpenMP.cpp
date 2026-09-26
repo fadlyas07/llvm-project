@@ -220,6 +220,8 @@ class OMPLoopScope : public CodeGenFunction::RunCleanupsScope {
     } else if (const auto *Interchange =
                    dyn_cast<OMPInterchangeDirective>(&S)) {
       PreInits = Interchange->getPreInits();
+    } else if (const auto *Flatten = dyn_cast<OMPFlattenDirective>(&S)) {
+      PreInits = Flatten->getPreInits();
     } else {
       llvm_unreachable("Unknown loop-based directive kind.");
     }
@@ -491,7 +493,12 @@ void CodeGenFunction::GenerateOpenMPCapturedVars(
       CapturedVars.push_back(CV);
     } else {
       assert(CurCap->capturesVariable() && "Expected capture by reference.");
-      CapturedVars.push_back(EmitLValue(*I).getAddress().emitRawPointer(*this));
+      llvm::Value *Addr = EmitLValue(*I).getAddress().emitRawPointer(*this);
+      // Sema strips the address space from the type of the captured field.
+      llvm::Type *ArgTy = ConvertType(CurField->getType());
+      if (Addr->getType() != ArgTy)
+        Addr = performAddrSpaceCast(Addr, ArgTy);
+      CapturedVars.push_back(Addr);
     }
   }
 }
@@ -3449,6 +3456,13 @@ void CodeGenFunction::EmitOMPInterchangeDirective(
   // Emit the de-sugared statement.
   OMPTransformDirectiveScopeRAII InterchangeScope(*this, &S);
   EmitStmt(S.getTransformedStmt());
+}
+
+void CodeGenFunction::EmitOMPFlattenDirective(const OMPFlattenDirective &S) {
+  // Emit the de-sugared statement.
+  OMPTransformDirectiveScopeRAII FlattenScope(*this, &S);
+  EmitStmt(S.getTransformedStmt());
+  EmitStmt(S.getFinals());
 }
 
 void CodeGenFunction::EmitOMPFuseDirective(const OMPFuseDirective &S) {
