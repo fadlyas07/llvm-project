@@ -1,9 +1,9 @@
-# Check that JIT'd code can load from global data defined in another object.
+# Check that JIT'd code can load from hidden data defined in another object.
 #
-# Stresses: fixups for code addressing data defined in another object, which
-# the compiler usually addresses through the GOT.
+# Stresses: fixups for code addressing data defined in another object
+# directly, rather than through the GOT. Hidden data must be defined in the
+# same linkage unit, so the compiler may address it directly.
 
-REQUIRES: split-file
 RUN: rm -rf %t && split-file %s %t
 RUN: %{cc} -O0 -c -o %t/def.O0.o %t/def.c
 RUN: %{cc} -O0 -c -o %t/main.O0.o %t/main.c
@@ -15,10 +15,10 @@ RUN: %{obj-jit} -show-jit-result %t/main.O2.o %t/def.O2.o | FileCheck %s
 CHECK: JIT result: 0
 
 #--- def.c
-int Data = 42;
+__attribute__((visibility("hidden"))) int Data = 42;
 
 #--- main.c
-extern int Data;
+extern __attribute__((visibility("hidden"))) int Data;
 
 int main(void) {
   if (Data != 42)
